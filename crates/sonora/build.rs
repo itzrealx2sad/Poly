@@ -9,13 +9,15 @@ fn main() {
     {
         let icon = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../assets/windows/sonora.ico"
+            "/../../assets/windows/poly.ico"
         );
         println!("cargo:rerun-if-changed={icon}");
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon(icon);
         resource.set("ProductName", "Poly");
         resource.set("FileDescription", "Poly");
+        resource.set("InternalName", "poly.exe");
+        resource.set("OriginalFilename", "poly.exe");
         if let Err(error) = resource.compile() {
             println!("cargo:warning=cannot embed the windows icon: {error}");
         }

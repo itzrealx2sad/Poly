@@ -2,7 +2,7 @@
 setlocal
 
 :: ─────────────────────────────────────────────────
-::  Sonora Fast Build
+::  Poly Fast Build
 ::  Maximizes cargo build speed for iterative dev
 :: ─────────────────────────────────────────────────
 
@@ -22,14 +22,14 @@ if %ERRORLEVEL%==0 (
 
 echo.
 echo ══════════════════════════════════════════
-echo   Sonora — Fast Dev Build
+echo   Poly — Fast Dev Build
 echo   Jobs: %CARGO_BUILD_JOBS%  Codegen units: 16
 echo ══════════════════════════════════════════
 echo.
 
 :: Build only the final binary crate (pulls in workspace deps automatically)
 :: Skips any crates not in the dependency chain
-cargo build --package sonora %*
+cargo build --package poly %*
 
 echo.
 if %ERRORLEVEL%==0 (

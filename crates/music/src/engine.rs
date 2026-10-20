@@ -1278,7 +1278,7 @@ fn audio_loop<F: Fetch>(
         let mut finish_crossfade = false;
         if let Some(xf) = &mut crossfading {
             let frames = samples.len() / usize::from(held.channels).max(1);
-            let mut scratch = std::mem::take(&mut xf.scratch);
+            let scratch = std::mem::take(&mut xf.scratch);
             let in_samples = xf.incoming.take(frames, scratch);
             if let Some(in_samples) = in_samples {
                 finish_crossfade = xf.mixer.mix_block(&mut samples, &in_samples);

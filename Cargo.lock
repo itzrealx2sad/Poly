@@ -7391,7 +7391,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sonora"
+name = "poly"
 version = "0.43.0"
 dependencies = [
  "anyhow",

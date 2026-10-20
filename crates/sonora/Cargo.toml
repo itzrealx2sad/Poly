@@ -1,8 +1,13 @@
 [package]
-name = "sonora"
+name = "poly"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "poly"
+
+[[bin]]
+name = "poly"
+path = "src/main.rs"
 
 [features]
 # the gpui frame overlay and repaint wash, off in normal builds

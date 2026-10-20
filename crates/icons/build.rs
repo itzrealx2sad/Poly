@@ -54,6 +54,7 @@ fn main() {
 
     let out = PathBuf::from(env::var("OUT_DIR").expect("cargo sets the output")).join("packs.rs");
     fs::write(&out, source).expect("cannot write the icon registry");
+    println!("cargo:rerun-if-changed={}", assets.display());
     println!("cargo:rerun-if-changed=build.rs");
 }
 
