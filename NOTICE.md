@@ -86,7 +86,7 @@ The following primary architectural enhancements and features were introduced in
 ### Modified Files (from Upstream Sonora)
 - `Cargo.toml` - Updated repository URL to the Poly fork.
 - `.github/readme-icon.svg` - Updated readme header logo to Poly.
-- `assets/icon.svg` - Master SVG icon updated with Poly squircle branding.
+- `assets/icon.svg` - Master SVG icon updated with white Poly logo vector.
 - `assets/tray/sonora.png` - System tray icon updated with Poly icon.
 - `assets/windows/sonora.ico` - Windows executable icon updated with Poly icon.
 - `assets/i18n/en-US/main.ftl` - Added localization strings for transitions, settings, and curated UI.
