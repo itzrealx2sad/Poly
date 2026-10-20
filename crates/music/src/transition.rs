@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Poly Project Contributors
 
 use std::f32::consts::{FRAC_PI_2, PI, SQRT_2};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -24,6 +25,10 @@ pub enum TransitionConfig {
 impl TransitionConfig {
     pub fn is_active(self) -> bool {
         !matches!(self, Self::None)
+    }
+
+    pub fn is_enabled(self) -> bool {
+        self.is_active()
     }
 
     pub fn is_automix(self) -> bool {
@@ -463,6 +468,18 @@ pub struct EnvelopeFollower {
 }
 
 impl EnvelopeFollower {
+    pub fn new(_sample_rate: u32) -> Self {
+        Self::default()
+    }
+
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn observe_block(&mut self, samples: &[f32], _channels: usize) {
+        self.observe(samples);
+    }
+
     pub fn observe(&mut self, samples: &[f32]) {
         if samples.is_empty() {
             return;
@@ -565,6 +582,20 @@ impl BeatAccentDetector {
 pub struct SilenceTrimmer;
 
 impl SilenceTrimmer {
+    pub fn trim<S: Iterator<Item = f32>>(
+        source: &mut S,
+        sample_rate: u32,
+        channels: u16,
+        _gain: f32,
+    ) -> (Vec<f32>, u64, Duration) {
+        let (skipped_samples, ring) = Self::trim_leading(source, sample_rate, channels);
+        let ch = u64::from(channels).max(1);
+        let rate = f64::from(sample_rate).max(1.0);
+        let frames = skipped_samples / ch;
+        let dur = Duration::from_secs_f64(frames as f64 / rate);
+        (ring, skipped_samples, dur)
+    }
+
     pub fn trim_leading<S: Iterator<Item = f32>>(
         source: &mut S,
         sample_rate: u32,
@@ -611,13 +642,15 @@ pub struct StreamResampler {
     phase: f64,
     history: [[f32; 4]; 2],
     primed: bool,
+    in_buf: Vec<f32>,
+    in_pos: usize,
 }
 
 impl StreamResampler {
     pub fn new(
         source_rate: u32,
-        target_rate: u32,
         source_channels: u16,
+        target_rate: u32,
         target_channels: u16,
     ) -> Option<Self> {
         let s_rate = source_rate.max(1);
@@ -636,6 +669,8 @@ impl StreamResampler {
             phase: 0.0,
             history: [[0.0; 4]; 2],
             primed: false,
+            in_buf: Vec::new(),
+            in_pos: 0,
         })
     }
 
@@ -643,6 +678,8 @@ impl StreamResampler {
         self.phase = 0.0;
         self.history = [[0.0; 4]; 2];
         self.primed = false;
+        self.in_buf.clear();
+        self.in_pos = 0;
     }
 
     fn pull_source_frame<S: Iterator<Item = f32>>(
@@ -779,9 +816,92 @@ impl StreamResampler {
             }
         }
     }
+
+    fn next_input_frame(
+        &mut self,
+        pull: &mut impl FnMut(usize, &mut Vec<f32>),
+    ) -> Option<[f32; 2]> {
+        let ch = self.source_channels;
+        if self.in_pos + ch > self.in_buf.len() {
+            if self.in_pos < self.in_buf.len() {
+                self.in_buf.drain(0..self.in_pos);
+            } else {
+                self.in_buf.clear();
+            }
+            self.in_pos = 0;
+            let needed = ch * 256;
+            pull(needed, &mut self.in_buf);
+            if self.in_pos + ch > self.in_buf.len() {
+                return None;
+            }
+        }
+        let first = self.in_buf[self.in_pos];
+        let second = if ch > 1 {
+            self.in_buf[self.in_pos + 1]
+        } else {
+            first
+        };
+        self.in_pos += ch;
+        Some([first, second])
+    }
+
+    pub fn produce(
+        &mut self,
+        target_frames: usize,
+        out: &mut Vec<f32>,
+        mut pull: impl FnMut(usize, &mut Vec<f32>),
+    ) {
+        if self.source_rate == self.target_rate {
+            for _ in 0..target_frames {
+                let Some(pair) = self.next_input_frame(&mut pull) else {
+                    break;
+                };
+                self.push_output_frame(pair, out);
+            }
+            return;
+        }
+        if !self.primed {
+            let Some(first) = self.next_input_frame(&mut pull) else {
+                return;
+            };
+            let second = self.next_input_frame(&mut pull).unwrap_or(first);
+            for ch in 0..2 {
+                self.history[ch] = [first[ch], first[ch], second[ch], second[ch]];
+            }
+            self.primed = true;
+        }
+        for _ in 0..target_frames {
+            while self.phase >= 1.0 {
+                let Some(next_pair) = self.next_input_frame(&mut pull) else {
+                    return;
+                };
+                for ch in 0..2 {
+                    let h = &mut self.history[ch];
+                    h[0] = h[1];
+                    h[1] = h[2];
+                    h[2] = h[3];
+                    h[3] = next_pair[ch];
+                }
+                self.phase -= 1.0;
+            }
+            let t = self.phase as f32;
+            let mut interpolated = [0.0f32; 2];
+            for ch in 0..2 {
+                let [y0, y1, y2, y3] = self.history[ch];
+                let c0 = y1;
+                let c1 = 0.5 * (y2 - y0);
+                let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+                let c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+                interpolated[ch] = ((c3 * t + c2) * t + c1) * t + c0;
+            }
+            self.push_output_frame(interpolated, out);
+            self.phase += self.step;
+        }
+    }
 }
 
 pub struct DualStreamMixer {
+    channels: usize,
     total_frames: usize,
     done_frames: usize,
     is_automix: bool,
@@ -792,13 +912,14 @@ pub struct DualStreamMixer {
 }
 
 impl DualStreamMixer {
-    pub fn new(config: TransitionConfig, sample_rate: u32, duration: Duration) -> Self {
+    pub fn new(sample_rate: u32, channels: u16, total_frames: usize, is_automix: bool) -> Self {
         let rate = sample_rate.max(8000);
-        let total_frames = ((duration.as_secs_f64() * rate as f64).round() as usize).max(1);
+        let ch = usize::from(channels).max(1);
         Self {
-            total_frames,
+            channels: ch,
+            total_frames: total_frames.max(1),
             done_frames: 0,
-            is_automix: config.is_automix(),
+            is_automix,
             out_deck: ThreeBandDeck::new(rate),
             in_deck: ThreeBandDeck::new(rate),
             out_env: EnvelopeFollower::default(),
@@ -810,8 +931,8 @@ impl DualStreamMixer {
         self.done_frames >= self.total_frames
     }
 
-    pub fn mix_block(&mut self, out_samples: &mut [f32], in_samples: &[f32], channels: usize) -> bool {
-        let ch = channels.max(1);
+    pub fn mix_block(&mut self, out_samples: &mut [f32], in_samples: &[f32]) -> bool {
+        let ch = self.channels;
         let frames = out_samples.len() / ch;
         if frames == 0 || in_samples.is_empty() {
             return true;
@@ -940,10 +1061,12 @@ pub struct SingleDeckProcessor {
     total_outro: usize,
     outro_wait_frames: usize,
     sample_rate: u32,
+    channels: usize,
+    sync: Arc<TransitionSync>,
 }
 
 impl SingleDeckProcessor {
-    pub fn new(sample_rate: u32) -> Self {
+    pub fn new(sample_rate: u32, channels: usize, sync: Arc<TransitionSync>) -> Self {
         let rate = sample_rate.max(8000);
         Self {
             deck: ThreeBandDeck::new(rate),
@@ -956,18 +1079,16 @@ impl SingleDeckProcessor {
             total_outro: 0,
             outro_wait_frames: 0,
             sample_rate: rate,
+            channels: channels.max(1),
+            sync,
         }
     }
 
-    pub fn on_start(&mut self, signal: Option<TransitionSignal>) {
-        if let Some(ctrl) = signal {
-            self.seen_intro_trigger = ctrl.intro_trigger;
-            if ctrl.intro_trigger > 0 && ctrl.intro_secs > 0.0 {
-                let secs = ctrl.intro_secs.clamp(0.5, 12.0);
-                self.total_intro = (secs * self.sample_rate as f32) as usize;
-            } else {
-                self.total_intro = 0;
-            }
+    pub fn on_start(&mut self, signal: &TransitionSignal) {
+        self.seen_intro_trigger = signal.intro_trigger;
+        if signal.intro_trigger > 0 && signal.intro_secs > 0.0 {
+            let secs = signal.intro_secs.clamp(0.5, 12.0);
+            self.total_intro = (secs * self.sample_rate as f32) as usize;
         } else {
             self.total_intro = 0;
         }
@@ -977,6 +1098,12 @@ impl SingleDeckProcessor {
         self.outro_wait_frames = 0;
         self.deck.reset();
         self.beat_detector = BeatAccentDetector::new(self.sample_rate);
+    }
+
+    pub fn process(&mut self, samples: &mut [f32], ctrl: &TransitionSignal) {
+        let sync = Arc::clone(&self.sync);
+        let channels = self.channels;
+        self.process_packet(samples, channels, Some(*ctrl), &sync);
     }
 
     pub fn process_packet(

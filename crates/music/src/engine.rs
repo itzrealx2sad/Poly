@@ -800,12 +800,12 @@ impl<F: Fetch> Playing<F> {
             playing.base += skipped_dur;
         }
         if playing.source_rate != target_rate || playing.source_channels != target_channels {
-            playing.resampler = Some(StreamResampler::new(
+            playing.resampler = StreamResampler::new(
                 playing.source_rate,
                 playing.source_channels,
                 target_rate,
                 target_channels,
-            ));
+            );
             playing.rate = target_rate;
             playing.channels = target_channels;
             playing.envelope = EnvelopeFollower::new(target_rate);
@@ -1177,7 +1177,7 @@ fn audio_loop<F: Fetch>(
             })
         });
         let target_duration = transition.duration_for(track_duration);
-        let lookahead = transition.early_fade_lookahead(target_duration);
+        let lookahead = transition.early_fade_lookahead(track_duration);
 
         if target_duration > Duration::ZERO
             && crossfading.is_none()
