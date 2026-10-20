@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
@@ -818,9 +822,15 @@ impl Queue {
     pub fn rewind(&mut self, cx: &mut Context<Self>) -> Option<Track> {
         self.upcoming.truncate(self.queued());
         self.similar = 0;
-        let mut entries = std::mem::take(&mut self.past);
-        entries.extend(self.current.take());
-        entries.extend(self.upcoming.drain(..));
+        let entries = match self.source.is_empty() {
+            false if !self.shuffle => self.source.clone(),
+            _ => {
+                let mut entries = std::mem::take(&mut self.past);
+                entries.extend(self.current.take());
+                entries.extend(self.upcoming.drain(..));
+                entries
+            }
+        };
         self.fill(entries, 0, cx)
     }
 

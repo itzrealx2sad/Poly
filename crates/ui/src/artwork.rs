@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use crate::metrics::snapped;
 use crate::palette::{CoverPalette, of_image};
 use crate::skeleton::Skeleton;
@@ -29,8 +33,8 @@ pub(crate) const ROUNDED: Pixels = px(4.);
 /// largest window a cover was drawn in, so a HiDPI grid never trims what it shows. The
 /// cache is allowed half as much again past its budget while a scroll pulls covers in,
 /// since a trim asks every window to redraw and is worth doing in one batch.
-const CACHE_BYTES: usize = 16 * 1024 * 1024;
-const CACHE_ITEMS: usize = 256;
+const CACHE_BYTES: usize = 64 * 1024 * 1024;
+const CACHE_ITEMS: usize = 512;
 /// The largest edge a cover is decoded at. It sits above a fullscreen cover on a 5K screen at
 /// 2x, so it only ever stops a local original of several thousand pixels from being kept whole.
 const MAX_SAMPLE_EDGE: u32 = 4096;
@@ -50,11 +54,11 @@ const SOFT_ITEMS: usize = 2;
 const SOFT_SIGMA: f32 = 1.6;
 const SMALL_BYTES: usize = 64 * 1024;
 const BIG_BYTES: usize = 256 * 1024;
-const MAX_PENDING: usize = 8;
+const MAX_PENDING: usize = 16;
 /// How many covers decode at once. A decode holds the whole source image, so this bounds
 /// the transient memory, and running decodes on their own threads keeps those buffers in a
 /// couple of malloc arenas rather than one per worker thread.
-const DECODERS: usize = 2;
+const DECODERS: usize = 4;
 /// How long a condemned cover is held before it is dropped. One redraw of every window
 /// is all it takes for anything still on screen to ask for its cover again, and that
 /// redraw is already on its way when the batch is condemned.
@@ -279,10 +283,7 @@ fn artwork_frame(image: DynamicImage, edge: u32) -> RgbaImage {
                 true => image,
                 false => image.crop_imm((width - side) / 2, (height - side) / 2, side, side),
             };
-            match side > edge.saturating_mul(2) {
-                true => square.thumbnail_exact(edge, edge),
-                false => square.resize_exact(edge, edge, imageops::FilterType::Triangle),
-            }
+            square.resize_exact(edge, edge, imageops::FilterType::Lanczos3)
         }
     };
     let mut image = image.into_rgba8();
@@ -705,15 +706,26 @@ fn blurred(image: &RenderImage) -> Option<Arc<RenderImage>> {
 /// The edge a cover drawn at `size` is decoded at: its physical size rounded up to the next
 /// `EDGE_STEP`, so nearby sizes share one decode, and never past `MAX_SAMPLE_EDGE`.
 fn sample_edge(size: Pixels, window: &Window) -> u32 {
-    let physical = ((size / px(1.)) * window.scale_factor()).ceil().max(1.) as u32;
+    let scale = window.scale_factor().max(1.0);
+    let physical = ((size / px(1.)) * scale * 1.5).ceil().max(1.) as u32;
     physical.next_multiple_of(EDGE_STEP).min(MAX_SAMPLE_EDGE)
+}
+
+fn optimize_artwork_url(url: &str) -> String {
+    if url.contains("i.scdn.co/image/ab67") {
+        url.replace("00004851", "0000b273")
+            .replace("00001e02", "0000b273")
+    } else {
+        url.to_owned()
+    }
 }
 
 pub(crate) fn resource(url: impl Into<SharedString>) -> Resource {
     let url = url.into();
-    match url.strip_prefix(FILE_PREFIX) {
+    let optimized = optimize_artwork_url(url.as_ref());
+    match optimized.strip_prefix(FILE_PREFIX) {
         Some(path) => Resource::Path(Arc::from(Path::new(path))),
-        None => Resource::Uri(SharedUri::from(url)),
+        None => Resource::Uri(SharedUri::from(optimized)),
     }
 }
 

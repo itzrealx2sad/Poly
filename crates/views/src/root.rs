@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::{AnyView, Context, Entity, MouseButton, NavigationDirection, Render, Task};
 use gpui::{App, Font, FontFallbacks, SharedString, StyleRefinement, font, prelude::*};
 use gpui::{Window, div};
@@ -797,6 +801,8 @@ impl Render for Root {
         if self.background != Some(appearance) {
             self.background = Some(appearance);
             window.set_background_appearance(appearance);
+            #[cfg(target_os = "windows")]
+            state::apply_window_backdrop(window, theme.blur_window, theme.transparent, cx);
         }
 
         // Windows can only round a window's corners while it's opaque (DWM never rounds a
@@ -965,14 +971,27 @@ impl Render for Root {
             .when(ambient, |this| this.child(self.ambient.clone()))
             // The bar only changes when it is told to, so a frame drawn for the lyrics or the
             // progress bar replays it rather than building it again.
-            .child(
-                self.title_bar.clone().cached(
-                    StyleRefinement::default()
-                        .w_full()
-                        .h(ui::snapped(theme.metrics.title_bar, window))
-                        .flex_none(),
-                ),
-            )
+            .when(!cfg!(target_os = "windows"), |this| {
+                this.child(
+                    self.title_bar.clone().cached(
+                        StyleRefinement::default()
+                            .w_full()
+                            .h(ui::snapped(theme.metrics.title_bar, window))
+                            .flex_none(),
+                    ),
+                )
+            })
+            .when(cfg!(target_os = "windows"), |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .h(gpui::px(40.))
+                        .window_control_area(gpui::WindowControlArea::Drag),
+                )
+            })
             .when_else(
                 show_sign_in,
                 |this| this.child(div().flex().flex_1().min_h_0().child(self.login.clone())),

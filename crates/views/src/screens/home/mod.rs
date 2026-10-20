@@ -1,22 +1,30 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
+mod curated;
+
 use std::rc::Rc;
 
-use crate::chrome::Chrome;
-use crate::shared::menus::{Item, ItemMenu};
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, MouseDownEvent, Pixels, Point, Render, ScrollHandle, WeakEntity,
-    Window, div, px,
+    AnyElement, App, Context, ElementId, Entity, FontWeight, MouseDownEvent, Pixels, Point, Render,
+    ScrollHandle, SharedString, WeakEntity, Window, div, px, svg,
 };
 use i18n::t;
 use music::GenreItem;
-use state::{Home, Network, Playback, SessionState, Sonora};
-use ui::{ActiveTheme as _, Lazy, Mode, Popup, Scrollbar, Scroller};
+use state::{Home, Network, Playback};
+use ui::{ActiveTheme as _, Mode, Popup, Scrollbar, Scroller, Text};
 
+use crate::chrome::Chrome;
+use crate::shared::album_grid::CardGrid;
+use crate::shared::cards;
 use crate::shared::cells;
-use crate::shared::picks::{Picks, Shape};
-use crate::shared::shelves::Shelves;
+use crate::shared::menus::{Item, ItemMenu};
+use crate::shared::shelves::{Rail, RailSpec, Shelves};
 use crate::shared::tracks::{PlaybackStatus, playback_status};
 use crate::shared::trouble;
+use curated::Curated;
 
 const STEADY: Pixels = px(0.5);
 
@@ -26,28 +34,10 @@ pub(crate) struct HomeView {
     playback_status: PlaybackStatus,
     shelves: Entity<Shelves>,
     width: Pixels,
-    quick_picks: Pager,
+    rail: Rail,
     scrollbar: Entity<Scrollbar>,
-    /// The submenu state of a track's context menu.
     menus: ItemMenu,
     context_menu: Option<(Item, Point<Pixels>)>,
-}
-
-#[derive(Default)]
-struct Pager {
-    columns: usize,
-    page: usize,
-}
-
-impl Pager {
-    fn fit(&mut self, columns: usize, pages: usize) -> usize {
-        if self.columns != columns {
-            self.columns = columns;
-            self.page = 0;
-        }
-        self.page = self.page.min(pages.saturating_sub(1));
-        self.page
-    }
 }
 
 impl HomeView {
@@ -69,7 +59,7 @@ impl HomeView {
         let chrome = Chrome::entity(cx);
         cx.observe(&chrome, |_, _, cx| cx.notify()).detach();
 
-        let library = Sonora::global(cx).library.clone();
+        let library = state::Sonora::global(cx).library.clone();
         cx.observe(&library, |_, _, cx| cx.notify()).detach();
 
         let shelves = cx.new(|_| Shelves::new("home-shelf", me, playback.clone()));
@@ -91,65 +81,95 @@ impl HomeView {
             playback_status: current_playback,
             shelves,
             width: Pixels::ZERO,
-            quick_picks: Pager::default(),
+            rail: Rail::new(me),
             scrollbar: cx.new(|_| Scrollbar::new(ScrollHandle::new()).watching(me)),
             menus,
             context_menu: None,
         }
     }
 
-    /// Tells the feed whether this page is the one on screen, so it lands changes to what is
-    /// drawn only while nobody is looking.
     pub(crate) fn set_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         self.home
             .update(cx, |home, cx| home.set_visible(visible, cx));
     }
 
-    /// The Quick picks deck, headed by the name of the account it was drawn from. It is the
-    /// one deck on the page: what the provider lists as played lately and its picks after
-    /// them, a skeleton while they are on their way.
-    fn quick_picks(&mut self, width: Pixels, cx: &mut Context<Self>) -> AnyElement {
+    fn recommendations(
+        &self,
+        width: Pixels,
+        window: &Window,
+        notify: &Rc<dyn Fn(&mut App)>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = *cx.theme();
         let items = self.home.read(cx).quick_picks();
-        let shape = Shape::new(width, items.len());
-        let pages = shape.pages;
-        let page = self.quick_picks.fit(shape.columns, shape.pages);
-        let name = match self.home.read(cx).is_local(cx) {
-            true => None,
-            false => match Sonora::global(cx).session.read(cx).state() {
-                SessionState::SignedIn(profile) => Some(profile.display_name.clone()),
-                _ => None,
-            },
+        let items = match items.is_empty() {
+            true => Curated::recommendations(),
+            false => items.as_ref().clone(),
         };
-        let opened = items.clone();
+        let layout = CardGrid::layout(width);
+        let opened = Rc::new(items.clone());
+        let card = layout.card;
         let home = cx.entity().downgrade();
+        let playback = self.playback.clone();
 
-        Picks::mixed("quick-picks", items, self.playback.clone(), width, page)
-            .title("home-quick-picks")
-            .vacancy("home-quick-picks-empty")
-            .loading(self.home.read(cx).is_loading(cx))
-            .when_some(name.filter(|name| !name.is_empty()), |deck, name| {
-                deck.eyebrow(name)
-            })
-            .on_previous(cx.listener(|this, _, _, cx| {
-                this.quick_picks.page = this.quick_picks.page.saturating_sub(1);
-                this.context_menu = None;
-                cx.notify();
-            }))
-            .on_next(cx.listener(move |this, _, _, cx| {
-                this.quick_picks.page = (this.quick_picks.page + 1).min(pages.saturating_sub(1));
-                this.context_menu = None;
-                cx.notify();
-            }))
-            .on_context_menu(move |place, event, _, cx| {
-                open_item_menu(&home, &opened, place, event, cx);
-            })
-            .into_any_element()
+        let icon = svg()
+            .path(icons::path("icons/sparkles.svg"))
+            .size_5()
+            .flex_none()
+            .text_color(gpui::hsla(48.0 / 360.0, 0.96, 0.53, 1.0))
+            .into_any_element();
+
+        let badge = div()
+            .flex()
+            .items_center()
+            .rounded_full()
+            .bg(theme.primary.opacity(0.15))
+            .px_2p5()
+            .py_0p5()
+            .text_size(theme.text(Text::Tiny))
+            .text_color(theme.primary)
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(t!("home-live-picks"))
+            .into_any_element();
+
+        self.rail.render(
+            RailSpec {
+                tag: "home-picks",
+                place: 0,
+                title: t!("home-recommendations"),
+                icon: Some(icon),
+                badge: Some(badge),
+                count: items.len(),
+                tile: card,
+                columns: layout.columns,
+                tabs: None,
+                trailing: None,
+            },
+            window,
+            cx,
+            notify,
+            move |place, _, cx| {
+                let Some(item) = opened.get(place) else {
+                    return div().into_any_element();
+                };
+                let home_ref = home.clone();
+                let opened_items = opened.clone();
+                cards::item_card(
+                    ElementId::NamedInteger(SharedString::new_static("picks-item"), place as u64),
+                    item,
+                    &playback,
+                    cx,
+                )
+                .tile(card)
+                .flat()
+                .menu(move |event, _, cx| {
+                    open_item_menu(&home_ref, &opened_items, place, event, cx);
+                })
+                .into_any_element()
+            },
+        )
     }
 
-    /// The page home shows in place of its shelves: the No connection state the moment the
-    /// network is gone, since every row here comes from the provider, and the reason its feed
-    /// failed otherwise. Asking for the feed again is the retry, and it starts the pauses
-    /// between tries over.
     fn failure(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let reason = match Network::lost(cx) {
             true => None,
@@ -178,6 +198,7 @@ impl Render for HomeView {
             return div().size_full().child(failure).into_any_element();
         }
 
+        self.rail.sync();
         let theme = *cx.theme();
         let available = cells::content_width(window, theme.metrics.inset * 2., cx);
         if (available - self.width).abs() >= STEADY {
@@ -191,18 +212,24 @@ impl Render for HomeView {
             }))
         });
 
-        let view = cx.entity();
-        let picks = Lazy::new("home-quick-picks", move |_, cx| {
-            view.update(cx, |this, cx| this.quick_picks(available, cx))
+        let weak = cx.entity().downgrade();
+        let notify: Rc<dyn Fn(&mut App)> = Rc::new(move |cx: &mut App| {
+            weak.update(cx, |_, cx| cx.notify()).ok();
         });
+
+        let picks = self.recommendations(available, window, &notify, cx);
         let sections = self.home.read(cx).sections();
         let feeding = self.home.read(cx).is_feeding();
         let width = self.width;
         let shelves = self
             .shelves
-            .update(cx, |shelves, cx| match sections.is_empty() && feeding {
-                true => shelves.pending(width, cx),
-                false => vec![shelves.render(sections, Mode::Grid, width, window, cx)],
+            .update(cx, |shelves, cx| match (sections.is_empty(), feeding) {
+                (true, true) => shelves.pending(width, cx),
+                (false, _) => vec![shelves.render(sections, Mode::Grid, width, window, cx)],
+                (true, false) => {
+                    let curated = Curated::sections();
+                    vec![shelves.render(Rc::new(curated), Mode::Grid, width, window, cx)]
+                }
             });
 
         Scroller::new("home-page", &self.scrollbar)
@@ -211,7 +238,8 @@ impl Render for HomeView {
                 div()
                     .flex()
                     .flex_col()
-                    .gap_8()
+                    .gap_10()
+                    .pb(px(48.))
                     .child(picks)
                     .children(shelves),
             )

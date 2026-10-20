@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::prelude::*;
 use gpui::{
     App, Div, Font, FontFallbacks, MouseButton, Pixels, StyleRefinement, Window, WindowControlArea,
@@ -186,7 +190,15 @@ impl RenderOnce for WindowControls {
             .items_center()
             .when_else(
                 is_windows,
-                |this| this.h_full().self_stretch().gap_0(),
+                |this| {
+                    this.px(px(8.))
+                        .py(px(4.))
+                        .gap(px(6.))
+                        .rounded(px(10.))
+                        .bg(theme.foreground.opacity(0.08))
+                        .border_1()
+                        .border_color(theme.foreground.opacity(0.12))
+                },
                 |this| this.gap_2(),
             )
             .when(!SYSTEM_ACTS, |this| {
@@ -204,7 +216,7 @@ impl RenderOnce for WindowControls {
                     .justify_center()
                     .when_else(
                         is_windows,
-                        |this| this.h_full().aspect_square().rounded_none(),
+                        |this| this.size(px(24.)).rounded(px(6.)).cursor_pointer(),
                         |this| this.size(BUTTON).rounded(theme.radius).cursor_pointer(),
                     )
                     .occlude()
@@ -212,14 +224,17 @@ impl RenderOnce for WindowControls {
                     .hover(move |style| {
                         style.bg(match danger {
                             true => theme.danger,
-                            false => theme.secondary_active,
+                            false => match is_windows {
+                                true => theme.foreground.opacity(0.15),
+                                false => theme.secondary_active,
+                            },
                         })
                     })
                     .when(is_windows, |this| {
                         this.active(move |style| {
                             style.bg(match danger {
                                 true => theme.danger_hover,
-                                false => theme.secondary_hover,
+                                false => theme.foreground.opacity(0.25),
                             })
                         })
                     })

@@ -1,7 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Div, ElementId, Entity, EntityId, Pixels, Point, ScrollHandle,
-    ScrollWheelEvent, SharedString, WeakEntity, Window, div, point, px,
+    ScrollWheelEvent, SharedString, WeakEntity, Window, div, point, px, svg,
 };
 use std::rc::Rc;
 
@@ -203,11 +207,18 @@ impl Shelves {
             .child(
                 div()
                     .flex()
-                    .items_end()
+                    .items_center()
                     .justify_between()
                     .gap_4()
                     .h(head(window, cx))
-                    .child(heading(i18n::translate(&section.title), cx))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2p5()
+                            .child(section_icon(&section.title, place))
+                            .child(heading(i18n::translate(&section.title), cx)),
+                    )
                     .when(crowded, |this| {
                         this.child(self.arrows(place, &handle, &glide, me))
                     }),
@@ -449,17 +460,25 @@ impl Rail {
             tag,
             place,
             title,
+            icon,
+            badge,
             count,
             tile,
             columns,
             tabs,
+            trailing,
         } = spec;
         let tall = Card::tile_height(tile, window, cx);
         let scrolled = self.scroll.clone();
         let glided = self.glide.clone();
-        let arrows = match count > columns {
-            true => Some(arrows(tag, place, &self.scroll, &self.glide, notify)),
-            false => None,
+        let arrows = if let Some(trailing) = trailing {
+            Some(trailing)
+        } else if tag == "home-picks" && cfg!(target_os = "windows") {
+            None
+        } else if count > columns {
+            Some(arrows(tag, place, &self.scroll, &self.glide, notify))
+        } else {
+            None
         };
 
         div()
@@ -469,11 +488,19 @@ impl Rail {
             .child(
                 div()
                     .flex()
-                    .items_end()
+                    .items_center()
                     .justify_between()
                     .gap_4()
                     .h(head(window, cx))
-                    .child(heading(title, cx))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2p5()
+                            .children(icon)
+                            .child(heading(title, cx))
+                            .children(badge),
+                    )
                     .children(arrows),
             )
             .children(tabs)
@@ -540,17 +567,59 @@ impl Rail {
     }
 }
 
-/// What a rail draws: its heading and the cards behind it. `tile` is how wide one card
-/// stands and `columns` how many fit across, which is what decides whether the paging
-/// arrows show. `tabs` is the tab row, drawn between the heading and the cards.
 pub(crate) struct RailSpec {
     pub tag: &'static str,
     pub place: usize,
     pub title: SharedString,
+    pub icon: Option<AnyElement>,
+    pub badge: Option<AnyElement>,
     pub count: usize,
     pub tile: Pixels,
     pub columns: usize,
     pub tabs: Option<AnyElement>,
+    pub trailing: Option<AnyElement>,
+}
+
+pub(crate) fn section_icon(title: &str, place: usize) -> AnyElement {
+    let lower = title.to_ascii_lowercase();
+    let (icon, color) = if lower.contains("reciente")
+        || lower.contains("recent")
+        || lower.contains("listen")
+    {
+        ("icons/flame.svg", gpui::hsla(24.0 / 360.0, 0.95, 0.53, 1.0))
+    } else if lower.contains("chart")
+        || lower.contains("most")
+        || lower.contains("top")
+    {
+        ("icons/trophy.svg", gpui::hsla(38.0 / 360.0, 0.92, 0.50, 1.0))
+    } else if lower.contains("novedad")
+        || lower.contains("new")
+        || lower.contains("release")
+    {
+        ("icons/disc-3.svg", gpui::hsla(158.0 / 360.0, 0.64, 0.52, 1.0))
+    } else if lower.contains("chill")
+        || lower.contains("relaj")
+        || lower.contains("night")
+    {
+        ("icons/radio.svg", gpui::hsla(271.0 / 360.0, 0.91, 0.65, 1.0))
+    } else if lower.contains("dance") || lower.contains("party") {
+        ("icons/trending-up.svg", gpui::hsla(217.0 / 360.0, 0.91, 0.60, 1.0))
+    } else {
+        const ICONS: [(&str, gpui::Hsla); 4] = [
+            ("icons/sparkles.svg", gpui::hsla(48.0 / 360.0, 0.96, 0.53, 1.0)),
+            ("icons/flame.svg", gpui::hsla(24.0 / 360.0, 0.95, 0.53, 1.0)),
+            ("icons/disc-3.svg", gpui::hsla(158.0 / 360.0, 0.64, 0.52, 1.0)),
+            ("icons/trophy.svg", gpui::hsla(38.0 / 360.0, 0.92, 0.50, 1.0)),
+        ];
+        ICONS[place % ICONS.len()]
+    };
+
+    svg()
+        .path(icons::path(icon))
+        .size_5()
+        .flex_none()
+        .text_color(color)
+        .into_any_element()
 }
 
 /// The paging arrows of a rail head, which is what tells a crowded rail from a short one.

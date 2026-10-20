@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -173,6 +177,10 @@ enum Slot {
     AdaptiveMenu,
     Normalisation,
     Gapless,
+    AutoMix,
+    Crossfade,
+    CrossfadeMode,
+    CrossfadeDuration,
     Sleep,
     StayAwake,
     Widevine,
@@ -316,6 +324,7 @@ pub struct SettingsView {
     scrollbar: Entity<Scrollbar>,
     opacity: ScrubberState,
     sleep: ScrubberState,
+    crossfade_duration: ScrubberState,
     /// One slider per equalizer band, lowest first.
     bands: Vec<ScrubberState>,
     pending_sleep: Option<Option<Sleep>>,
@@ -418,6 +427,7 @@ impl SettingsView {
             scrollbar: cx.new(|_| Scrollbar::new(ScrollHandle::new()).watching(me)),
             opacity: ScrubberState::new("opacity"),
             sleep: ScrubberState::new("sleep"),
+            crossfade_duration: ScrubberState::new("crossfade-duration"),
             bands: (0..equalizer::BANDS)
                 .map(|band| ScrubberState::new(format!("equalizer-band-{band}")))
                 .collect(),
@@ -617,9 +627,19 @@ impl SettingsView {
                     Slot::Title("settings-tab-general"),
                     Slot::Normalisation,
                     Slot::Gapless,
+                    Slot::AutoMix,
+                    Slot::Crossfade,
+                ];
+                if self.settings.read(cx).crossfade() {
+                    slots.push(Slot::CrossfadeMode);
+                    if self.settings.read(cx).crossfade_mode() == state::CrossfadeMode::Manual {
+                        slots.push(Slot::CrossfadeDuration);
+                    }
+                }
+                slots.extend([
                     Slot::Sleep,
                     Slot::StayAwake,
-                ];
+                ]);
                 if self.drm.read(cx).shown(cx) {
                     slots.push(Slot::Widevine);
                 }
@@ -778,6 +798,16 @@ impl SettingsView {
                 t!("settings-normalisation-detail"),
             ),
             Slot::Gapless => (t!("settings-gapless"), t!("settings-gapless-detail")),
+            Slot::AutoMix => (t!("settings-automix"), t!("settings-automix-detail")),
+            Slot::Crossfade => (t!("settings-crossfade"), t!("settings-crossfade-detail")),
+            Slot::CrossfadeMode => (
+                t!("settings-crossfade-mode"),
+                t!("settings-crossfade-mode-detail"),
+            ),
+            Slot::CrossfadeDuration => (
+                t!("settings-crossfade-duration"),
+                t!("settings-crossfade-duration-detail"),
+            ),
             Slot::Sleep => (t!("settings-sleep"), t!("settings-sleep-detail")),
             Slot::StayAwake => (t!("settings-stay-awake"), t!("settings-stay-awake-detail")),
             Slot::Widevine => {
@@ -994,6 +1024,10 @@ impl SettingsView {
             Slot::AdaptiveMenu => self.adaptive_menu_row(cx).element,
             Slot::Normalisation => self.playback_row(cx).element,
             Slot::Gapless => self.gapless_row(cx).element,
+            Slot::AutoMix => self.automix_row(cx).element,
+            Slot::Crossfade => self.crossfade_row(cx).element,
+            Slot::CrossfadeMode => self.crossfade_mode_row(cx).element,
+            Slot::CrossfadeDuration => self.crossfade_duration_row(cx).element,
             Slot::Sleep => self.sleep_row(cx).element,
             Slot::StayAwake => self.stay_awake_row(cx).element,
             Slot::Widevine => self.widevine_row(cx).element,
@@ -2273,6 +2307,127 @@ impl SettingsView {
         )
     }
 
+    fn automix_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let on = self.settings.read(cx).automix();
+
+        self.row(
+            t!("settings-automix"),
+            t!("settings-automix-detail"),
+            muted,
+            small,
+            Switch::new("automix", on)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.playback
+                        .update(cx, |playback, cx| playback.set_automix(!on, cx));
+                }))
+                .into_any_element(),
+        )
+    }
+
+    fn crossfade_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let on = self.settings.read(cx).crossfade();
+
+        self.row(
+            t!("settings-crossfade"),
+            t!("settings-crossfade-detail"),
+            muted,
+            small,
+            Switch::new("crossfade", on)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.playback
+                        .update(cx, |playback, cx| playback.set_crossfade(!on, cx));
+                }))
+                .into_any_element(),
+        )
+    }
+
+    fn crossfade_mode_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let current = self.settings.read(cx).crossfade_mode();
+        let label = match current {
+            state::CrossfadeMode::Auto => t!("settings-crossfade-mode-auto"),
+            state::CrossfadeMode::Manual => t!("settings-crossfade-mode-manual"),
+        };
+
+        let picker = Picker::new("crossfade-mode", &self.popovers, label)
+            .width(Picker::NARROW)
+            .items([
+                MenuItem::new("crossfade-mode-auto", t!("settings-crossfade-mode-auto"))
+                    .selected(current == state::CrossfadeMode::Auto)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.playback.update(cx, |playback, cx| {
+                            playback.set_crossfade_mode(state::CrossfadeMode::Auto, cx);
+                        });
+                        cx.notify();
+                    })),
+                MenuItem::new("crossfade-mode-manual", t!("settings-crossfade-mode-manual"))
+                    .selected(current == state::CrossfadeMode::Manual)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.playback.update(cx, |playback, cx| {
+                            playback.set_crossfade_mode(state::CrossfadeMode::Manual, cx);
+                        });
+                        cx.notify();
+                    })),
+            ]);
+
+        self.row(
+            t!("settings-crossfade-mode"),
+            t!("settings-crossfade-mode-detail"),
+            muted,
+            small,
+            picker.into_any_element(),
+        )
+    }
+
+    fn crossfade_duration_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let current = self.playback.read(cx).crossfade_duration();
+        let fraction = (current.clamp(1, 12) - 1) as f32 / 11.0;
+
+        let control = div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .child(
+                div().w(theme.metrics.cover).child(
+                    Scrubber::new(&self.crossfade_duration, fraction)
+                        .colors(theme.progress_bar, theme.muted, theme.foreground)
+                        .on_move(cx.listener(move |this, fraction: &f32, _, cx| {
+                            let seconds = (1.0 + *fraction * 11.0).round() as u32;
+                            this.playback.update(cx, |playback, cx| {
+                                playback.set_crossfade_duration(seconds, cx);
+                            });
+                        })),
+                ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(theme.metrics.control * 1.5)
+                    .whitespace_nowrap()
+                    .text_right()
+                    .child(format!("{current}s")),
+            );
+
+        self.row(
+            t!("settings-crossfade-duration"),
+            t!("settings-crossfade-duration-detail"),
+            muted,
+            small,
+            control.into_any_element(),
+        )
+    }
+
     fn stay_awake_row(&self, cx: &mut Context<Self>) -> Setting {
         let theme = *cx.theme();
         let muted = theme.muted_foreground;
@@ -2328,6 +2483,16 @@ impl SettingsView {
 
         let picker = Picker::new(EQUALIZER_PRESETS, &self.popovers, label)
             .width(Picker::NARROW)
+            .item(
+                MenuItem::new("custom", t!("settings-equalizer-custom"))
+                    .selected(chosen.is_none())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.playback.update(cx, |playback, cx| {
+                            playback.apply_custom_equalizer(cx);
+                        });
+                        cx.notify();
+                    })),
+            )
             .items(Preset::ALL.map(|preset| {
                 MenuItem::new(preset.id(), i18n::lookup(preset_key(preset), None))
                     .selected(chosen == Some(preset))

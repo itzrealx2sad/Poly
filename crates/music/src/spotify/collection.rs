@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -202,18 +206,18 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
 }
 
 fn cover_url(album: &AlbumMessage) -> Option<String> {
-    let smallest = album
+    let largest = album
         .cover_group
         .as_ref()?
         .image
         .iter()
         .filter(|image| image.has_file_id())
-        .min_by_key(|image| match image.size() {
+        .max_by_key(|image| match image.size() {
             ImageSize::SMALL => 0,
             ImageSize::DEFAULT => 1,
             ImageSize::LARGE => 2,
             ImageSize::XLARGE => 3,
         })?;
 
-    wire::image_url(smallest.file_id())
+    wire::image_url(largest.file_id())
 }

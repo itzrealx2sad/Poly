@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
@@ -81,6 +85,7 @@ pub struct Look {
     pub blur_window: bool,
     pub tint: Option<Hsla>,
     pub tint_secondary: Option<Hsla>,
+    pub pitch_black: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -425,6 +430,7 @@ pub struct Theme {
     /// The cover's runner-up hue, carried beside the lead tint for two-colour
     /// surfaces like the fullscreen ambient background. The selection itself stays single.
     pub tint_secondary: Option<Hsla>,
+    pub pitch_black: bool,
 }
 
 impl Global for Theme {}
@@ -477,6 +483,7 @@ impl Theme {
             blur_window: false,
             tint: None,
             tint_secondary: None,
+            pitch_black: false,
         }
     }
 
@@ -520,6 +527,7 @@ impl Theme {
             blur_window: false,
             tint: None,
             tint_secondary: None,
+            pitch_black: false,
         }
     }
 
@@ -563,6 +571,7 @@ impl Theme {
             blur_window: false,
             tint: None,
             tint_secondary: None,
+            pitch_black: false,
         }
     }
 
@@ -606,6 +615,7 @@ impl Theme {
             blur_window: false,
             tint: None,
             tint_secondary: None,
+            pitch_black: false,
         }
     }
 
@@ -924,6 +934,7 @@ impl Theme {
             table_active,
             table_active_border,
         );
+        theme.pitch_black = if delta >= 0.5 { other.pitch_black } else { self.pitch_black };
         theme
     }
 
@@ -1035,6 +1046,13 @@ impl Theme {
         theme.blur_window = look.blur_window;
         theme.tint = look.tint;
         theme.tint_secondary = look.tint_secondary;
+        if look.pitch_black && theme.background.l < 0.5 {
+            theme.background = Hsla { h: 0., s: 0., l: 0., a: 1. };
+            theme.sidebar = Hsla { h: 0., s: 0., l: 0.02, a: 1. };
+            theme.pitch_black = true;
+        } else {
+            theme.pitch_black = false;
+        }
         theme
     }
 
@@ -1218,6 +1236,7 @@ mod tests {
             blur_window: false,
             tint: Some(TINT),
             tint_secondary: None,
+            pitch_black: false,
         };
         let overrides = ThemeOverrides {
             background: Some("#101010".to_owned()),

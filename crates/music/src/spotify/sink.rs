@@ -1,6 +1,8 @@
-//! librespot's `Sink` over the shared paced output. librespot decodes on its own thread, so
-//! every write here is finished audio; the pacing and the device watch live in `crate::sink`.
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
 
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use librespot_playback::audio_backend::{Sink, SinkError, SinkResult};
@@ -11,17 +13,29 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::audio::Chain;
 use crate::sink::{Cue, Paced, packet, watch_for_output};
+use crate::transition::SingleDeckProcessor;
+pub use crate::transition::{TransitionSignal, TransitionSync};
 
 pub struct OutputSink {
     paced: Paced,
+    transition: Arc<RwLock<TransitionSignal>>,
+    processor: SingleDeckProcessor,
 }
 
 impl OutputSink {
-    /// The sink librespot's player builder asks for. Without an output device it gets a silent
-    /// one, so playback state still moves.
-    pub fn boxed(cue: Cue, chain: Chain, changed: UnboundedSender<()>) -> Box<dyn Sink> {
+    pub fn boxed(
+        cue: Cue,
+        chain: Chain,
+        changed: UnboundedSender<()>,
+        transition: Arc<RwLock<TransitionSignal>>,
+        sync: Arc<TransitionSync>,
+    ) -> Box<dyn Sink> {
         match Paced::open(cue.clone(), chain, changed.clone()) {
-            Ok(paced) => Box::new(Self { paced }),
+            Ok(paced) => Box::new(Self {
+                paced,
+                transition,
+                processor: SingleDeckProcessor::new(SAMPLE_RATE, NUM_CHANNELS as usize, sync),
+            }),
             Err(error) => {
                 log::error!("sink: cannot open an output device: {error:#}");
                 watch_for_output(changed);
@@ -32,9 +46,10 @@ impl OutputSink {
 }
 
 impl Sink for OutputSink {
-    /// librespot decodes everything at `SAMPLE_RATE`, so this is the one place the output
-    /// follows it, before the first packet of a play.
     fn start(&mut self) -> SinkResult<()> {
+        if let Some(ctrl) = self.transition.read().ok().map(|g| *g) {
+            self.processor.on_start(&ctrl);
+        }
         self.paced
             .fit(SAMPLE_RATE)
             .and_then(|()| self.paced.play())
@@ -46,14 +61,15 @@ impl Sink for OutputSink {
         Ok(())
     }
 
-    /// Casts the packet to `f32` the way librespot's `Converter::f64_to_f32` does, but into a
-    /// buffer the queue hands back once it has played rather than a fresh one per packet.
     fn write(&mut self, packeted: AudioPacket, _converter: &mut Converter) -> SinkResult<()> {
         let samples = packeted
             .samples()
             .map_err(|error| SinkError::OnWrite(error.to_string()))?;
         let mut narrowed = self.paced.buffer(samples.len());
         narrowed.extend(samples.iter().map(|sample| *sample as f32));
+        if let Some(ctrl) = self.transition.read().ok().map(|g| *g) {
+            self.processor.process(&mut narrowed, &ctrl);
+        }
         let Some(samples) = packet(narrowed, NUM_CHANNELS as u16, SAMPLE_RATE) else {
             return Ok(());
         };

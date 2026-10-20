@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -721,10 +725,13 @@ impl ArtistView {
                         tag: "artist-appears",
                         place: 0,
                         title: t!("artist-appears-on"),
+                        icon: None,
+                        badge: None,
                         count: appears,
                         tile: card,
                         columns,
                         tabs: None,
+                        trailing: None,
                     },
                     window,
                     cx,

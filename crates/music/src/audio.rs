@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::num::NonZero;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
@@ -47,6 +51,7 @@ impl Volume {
 
 /// What sits between the queue and the device: the equalizer, then the volume ramp, with the
 /// spectrum tap listening at the end. Every engine builds one and hands it to the output.
+#[derive(Clone)]
 pub struct Chain {
     pub volume: Volume,
     pub equalizer: Equalizer,

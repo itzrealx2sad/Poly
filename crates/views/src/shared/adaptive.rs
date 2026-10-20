@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::{App, Context, Entity, Task};
 use state::{AppSettings, Playback, Queue, Reloaded, Sonora};
 use ui::{ActiveTheme as _, CoverPalette, Look, Theme, ThemeKind};
@@ -144,9 +148,11 @@ impl Adaptive {
     fn apply(&mut self, palette: CoverPalette, instant: bool, cx: &mut App) {
         let kind = self.kind(cx);
         let theme = *cx.theme();
+        let tint = palette.primary.or(palette.neon_accent);
         if self.worn == Some(kind)
-            && theme.tint == palette.primary
+            && theme.tint == tint
             && theme.tint_secondary == palette.secondary
+            && theme.pitch_black == palette.pitch_black
         {
             return;
         }
@@ -159,8 +165,9 @@ impl Adaptive {
             (
                 Look {
                     kind,
-                    tint: palette.primary,
+                    tint,
                     tint_secondary: palette.secondary,
+                    pitch_black: palette.pitch_black,
                     ..settings.look()
                 },
                 settings.theme_overrides(),

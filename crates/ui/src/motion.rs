@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -186,7 +190,7 @@ impl Entrance {
         }
         let elapsed = self.started.elapsed().as_secs_f32();
         let progress = (elapsed / self.span.as_secs_f32()).clamp(0., 1.);
-        1. - ease_out_expo(progress)
+        1. - ease_out_cubic(progress)
     }
 
     pub fn running(self) -> bool {
@@ -195,7 +199,7 @@ impl Entrance {
 }
 
 fn entrance() -> Animation {
-    Animation::new(entrance_span()).with_easing(ease_out_expo)
+    Animation::new(entrance_span()).with_easing(ease_out_cubic)
 }
 
 pub fn veiled<E: Styled>(element: E, hidden: f32) -> E {

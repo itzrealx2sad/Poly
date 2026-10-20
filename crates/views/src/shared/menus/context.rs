@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::prelude::*;
 use gpui::{App, ClickEvent, ClipboardItem, Context, Entity, SharedString, Window};
 use i18n::t;
@@ -1016,6 +1020,7 @@ pub(crate) fn playlist_menu(playlist: Playlist, playback: Entity<Playback>, cx: 
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn item_menu(
     pin: &Pin,
     tracks: &ItemMenu,
@@ -1050,6 +1055,7 @@ pub(crate) fn item_menu(
     built.unwrap_or_else(|| sparse_menu(pin, playback, cx))
 }
 
+#[allow(dead_code)]
 pub(crate) fn pinned_artist(pin: &Pin) -> SavedArtist {
     SavedArtist {
         id: pin.id.clone(),
@@ -1059,6 +1065,7 @@ pub(crate) fn pinned_artist(pin: &Pin) -> SavedArtist {
     }
 }
 
+#[allow(dead_code)]
 fn sparse_menu(pin: &Pin, playback: Entity<Playback>, cx: &App) -> Menu {
     let destination = Destination::from(pin);
     let copied = pin.id.clone();
@@ -1084,8 +1091,7 @@ fn sparse_menu(pin: &Pin, playback: Entity<Playback>, cx: &App) -> Menu {
     )
 }
 
-/// The entry that opens a pin's page, which only an artist's and a song's menus carry, the
-/// way their full menus do.
+#[allow(dead_code)]
 fn open_key(kind: PinKind) -> Option<&'static str> {
     match kind {
         PinKind::Album | PinKind::Playlist => None,
@@ -1094,6 +1100,7 @@ fn open_key(kind: PinKind) -> Option<&'static str> {
     }
 }
 
+#[allow(dead_code)]
 fn transport_items(pin: &Pin, playback: Entity<Playback>) -> Vec<MenuItem> {
     let played = Origin::from(pin);
     let next = played.clone();
@@ -1210,6 +1217,7 @@ pub(crate) fn pin_action(pin: &Pin, cx: &App) -> MenuItem {
     }
 }
 
+#[allow(dead_code)]
 fn media_kind(kind: PinKind) -> MediaKind {
     match kind {
         PinKind::Album => MediaKind::Album,
@@ -1219,6 +1227,7 @@ fn media_kind(kind: PinKind) -> MediaKind {
     }
 }
 
+#[allow(dead_code)]
 fn saved_track(id: &str, cx: &App) -> Option<Track> {
     Sonora::global(cx)
         .library

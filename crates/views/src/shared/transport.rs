@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::prelude::*;
 use gpui::{App, Entity, SharedString, div};
 use i18n::t;
@@ -164,7 +168,10 @@ fn previous(playback: &Entity<Playback>, frosted: bool, cx: &App) -> Button {
 }
 
 fn next(playback: &Entity<Playback>, queue: &Entity<Queue>, frosted: bool, cx: &App) -> Button {
-    let enabled = queue.read(cx).has_next();
+    let enabled = queue.read(cx).has_next()
+        || playback.read(cx).repeat() != Repeat::Off
+        || queue.read(cx).shuffle()
+        || playback.read(cx).radio();
     let playback = playback.clone();
 
     Button::new("next")

@@ -1,4 +1,8 @@
-use std::sync::Arc;
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result};
@@ -6,58 +10,101 @@ use async_trait::async_trait;
 use librespot_core::{Session, SpotifyUri};
 use librespot_playback::config::{Bitrate, PlayerConfig};
 use librespot_playback::mixer::NoOpVolume;
-use librespot_playback::player::{Player, PlayerEvent};
-use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
+use librespot_playback::player::{Player, PlayerEvent, PlayerEventChannel};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::audio::{Chain, Volume};
 use crate::sink::Cue;
 use crate::spectrum::Spectrum;
-use crate::spotify::sink::OutputSink;
+use crate::spotify::sink::{OutputSink, TransitionSignal, TransitionSync};
 use crate::{
     PlaybackConfig, PlaybackEvent, PlaybackEvents, PlaybackFactory, Player as MusicPlayer,
+    TransitionConfig,
 };
 
 const TRACK_PREFIX: &str = "spotify:track:";
-/// Position reports that can still come from before a seek or load: one already in the channel
-/// and one for a packet decoded before the player read the command.
 const STALE_POSITIONS: u8 = 2;
 
-/// The engine's events, with one correction: librespot says `Playing` when the decoder is
-/// ready and `Seeked` when it has moved, both before it has buffered or written anything. Each
-/// waits here for the sink's next write, which the same player thread makes strictly after it.
+struct Deck {
+    player: Arc<Player>,
+    transition: Arc<RwLock<TransitionSignal>>,
+    cue: Cue,
+}
+
+impl Deck {
+    fn spawn_event_forwarder(
+        deck_idx: usize,
+        mut rx: PlayerEventChannel,
+        active_deck: Arc<RwLock<usize>>,
+        events_tx: UnboundedSender<PlayerEvent>,
+    ) {
+        std::thread::spawn(move || {
+            while let Some(event) = rx.blocking_recv() {
+                let is_active = active_deck.read().ok().map_or(false, |d| *d == deck_idx);
+                if is_active && events_tx.send(event).is_err() {
+                    break;
+                }
+            }
+        });
+    }
+}
+
 pub struct Events {
     player: UnboundedReceiver<PlayerEvent>,
     output: UnboundedReceiver<()>,
-    cue: Cue,
-    written: UnboundedReceiver<()>,
-    /// The `Playing` or `Seeked` waiting for the sink; a newer one replaces an older one.
+    cue_a: Cue,
+    cue_b: Cue,
+    active_deck: Arc<RwLock<usize>>,
+    written_a: UnboundedReceiver<()>,
+    written_b: UnboundedReceiver<()>,
     held: Option<PlaybackEvent>,
-    /// Position reports seen while the cue refuses writes. A seek or load that took keeps the
-    /// player thread busy, so a run of them means it never left the old position.
     stale: u8,
+    active_id: Arc<RwLock<Option<String>>>,
 }
 
 #[async_trait]
 impl PlaybackEvents for Events {
     async fn next(&mut self) -> Option<PlaybackEvent> {
         loop {
-            // librespot's event always precedes the write it led to, so it is taken first when
-            // both are ready at once.
+            let active_is_a = self.active_deck.read().ok().map_or(true, |d| *d == 0);
             tokio::select! {
                 biased;
                 event = self.player.recv() => {
-                    let Some(event) = translate(event?) else { continue };
+                    let raw_event = event?;
+                    let mut new_active_id = None;
+                    match &raw_event {
+                        PlayerEvent::Playing { track_id, .. } | PlayerEvent::Loading { track_id, .. } => {
+                            new_active_id = Some(track_id.to_id());
+                        }
+                        _ => {}
+                    }
+                    if let Some(new_id) = new_active_id {
+                        if let Ok(mut active) = self.active_id.write() {
+                            if active.as_deref() != Some(&new_id) {
+                                *active = Some(new_id.clone());
+                            }
+                        }
+                    }
+                    let Some(event) = translate(raw_event) else { continue };
                     match event {
                         PlaybackEvent::Playing { .. } | PlaybackEvent::Seeked { .. } => {
-                            self.cue.arm();
+                            if active_is_a {
+                                self.cue_a.arm();
+                            } else {
+                                self.cue_b.arm();
+                            }
                             self.stale = 0;
                             self.held = Some(event);
                         }
-                        PlaybackEvent::Position { .. } if self.cue.cleared() => {
+                        PlaybackEvent::Position { .. } if (if active_is_a { self.cue_a.cleared() } else { self.cue_b.cleared() }) => {
                             self.stale += 1;
                             if self.stale > STALE_POSITIONS {
                                 log::warn!("playback: the engine kept its old position, letting audio through");
-                                self.cue.arm();
+                                if active_is_a {
+                                    self.cue_a.arm();
+                                } else {
+                                    self.cue_b.arm();
+                                }
                                 self.stale = 0;
                             }
                             return Some(event);
@@ -72,10 +119,20 @@ impl PlaybackEvents for Events {
                         }
                     }
                 }
-                written = self.written.recv() => {
+                written = self.written_a.recv() => {
                     written?;
-                    if let Some(event) = self.held.take() {
-                        return Some(event);
+                    if active_is_a {
+                        if let Some(event) = self.held.take() {
+                            return Some(event);
+                        }
+                    }
+                }
+                written = self.written_b.recv() => {
+                    written?;
+                    if !active_is_a {
+                        if let Some(event) = self.held.take() {
+                            return Some(event);
+                        }
                     }
                 }
                 changed = self.output.recv() => {
@@ -87,7 +144,6 @@ impl PlaybackEvents for Events {
     }
 }
 
-/// Builds a Spotify engine on a connected session.
 pub struct Factory(Session);
 
 impl Factory {
@@ -103,12 +159,13 @@ impl PlaybackFactory for Factory {
     }
 }
 
-/// The librespot player with our sink behind it. Every method queues a command to librespot's
-/// own thread, which answers through `Events`.
 pub struct Engine {
-    player: Arc<Player>,
+    deck_a: Deck,
+    deck_b: Deck,
+    active_deck: Arc<RwLock<usize>>,
+    active_id: Arc<RwLock<Option<String>>>,
+    sync: Arc<TransitionSync>,
     volume: Volume,
-    cue: Cue,
     spectrum: Spectrum,
     gapless: bool,
 }
@@ -116,7 +173,6 @@ pub struct Engine {
 impl Engine {
     fn start(session: Session, config: PlaybackConfig) -> (Self, Events) {
         let volume = Volume::new(config.gain);
-        let (cue, written) = Cue::new();
         let spectrum = Spectrum::new();
 
         let player_config = PlayerConfig {
@@ -127,73 +183,256 @@ impl Engine {
             ..Default::default()
         };
 
-        let sink_cue = cue.clone();
         let chain = Chain {
             volume: volume.clone(),
             equalizer: config.equalizer.clone(),
             spectrum: spectrum.clone(),
         };
         let (output_tx, output_rx) = unbounded_channel();
-        let player = Player::new(player_config, session, Box::new(NoOpVolume), move || {
-            OutputSink::boxed(sink_cue, chain, output_tx.clone())
+        let (events_tx, events_rx) = unbounded_channel();
+        let active_deck = Arc::new(RwLock::new(0));
+        let active_id = Arc::new(RwLock::new(None));
+        let sync = Arc::new(TransitionSync::new());
+
+        let (cue_a, written_a) = Cue::new();
+        let transition_a = Arc::new(RwLock::new(TransitionSignal::default()));
+        let sink_cue_a = cue_a.clone();
+        let sink_trans_a = transition_a.clone();
+        let sink_sync_a = sync.clone();
+        let out_tx_a = output_tx.clone();
+        let chain_a = chain.clone();
+        let player_a = Player::new(
+            player_config.clone(),
+            session.clone(),
+            Box::new(NoOpVolume),
+            move || OutputSink::boxed(sink_cue_a, chain_a, out_tx_a, sink_trans_a, sink_sync_a),
+        );
+
+        let (cue_b, written_b) = Cue::new();
+        let transition_b = Arc::new(RwLock::new(TransitionSignal::default()));
+        let sink_cue_b = cue_b.clone();
+        let sink_trans_b = transition_b.clone();
+        let sink_sync_b = sync.clone();
+        let out_tx_b = output_tx.clone();
+        let chain_b = chain.clone();
+        let player_b = Player::new(player_config, session, Box::new(NoOpVolume), move || {
+            OutputSink::boxed(sink_cue_b, chain_b, out_tx_b, sink_trans_b, sink_sync_b)
         });
 
+        let rx_a = player_a.get_player_event_channel();
+        let rx_b = player_b.get_player_event_channel();
+
+        Deck::spawn_event_forwarder(0, rx_a, active_deck.clone(), events_tx.clone());
+        Deck::spawn_event_forwarder(1, rx_b, active_deck.clone(), events_tx);
+
+        let deck_a = Deck {
+            player: player_a,
+            transition: transition_a,
+            cue: cue_a.clone(),
+        };
+        let deck_b = Deck {
+            player: player_b,
+            transition: transition_b,
+            cue: cue_b.clone(),
+        };
+
         let events = Events {
-            player: player.get_player_event_channel(),
+            player: events_rx,
             output: output_rx,
-            cue: cue.clone(),
-            written,
+            cue_a,
+            cue_b,
+            active_deck: active_deck.clone(),
+            written_a,
+            written_b,
             held: None,
             stale: 0,
+            active_id: active_id.clone(),
         };
         let engine = Self {
-            player,
+            deck_a,
+            deck_b,
+            active_deck,
+            active_id,
+            sync,
             volume,
-            cue,
             spectrum,
             gapless: config.gapless,
         };
         (engine, events)
     }
 
+    fn current_transition_config(&self) -> TransitionConfig {
+        self.deck_a
+            .transition
+            .read()
+            .ok()
+            .map_or(TransitionConfig::None, |t| t.config)
+    }
+
+    fn deck(&self, idx: usize) -> &Deck {
+        if idx == 0 {
+            &self.deck_a
+        } else {
+            &self.deck_b
+        }
+    }
+
     fn load(&self, track_id: &str, at: Duration, seamless: bool) -> Result<()> {
         let uri = track_uri(track_id)?;
+        let cur_config = self.current_transition_config();
+        let is_transition = seamless && at.is_zero() && cur_config.is_enabled();
+        let has_active = self.active_id.read().ok().is_some_and(|id| id.is_some());
+
+        if is_transition && has_active {
+            let current_idx = *self.active_deck.read().unwrap();
+            let incoming_idx = 1 - current_idx;
+            let outro_secs = self
+                .deck(current_idx)
+                .transition
+                .read()
+                .ok()
+                .map(|c| c.outro_secs)
+                .filter(|&s| s > 0.5)
+                .unwrap_or_else(|| cur_config.duration_for(None).as_secs_f32());
+
+            if let Ok(mut ctrl) = self.deck(incoming_idx).transition.write() {
+                ctrl.config = cur_config;
+                ctrl.intro_trigger = ctrl.intro_trigger.wrapping_add(1);
+                ctrl.intro_secs = outro_secs;
+                ctrl.outro_trigger = 0;
+                ctrl.outro_secs = 0.0;
+            }
+
+            if let Ok(mut active) = self.active_deck.write() {
+                *active = incoming_idx;
+            }
+            if let Ok(mut active) = self.active_id.write() {
+                *active = Some(track_id.to_owned());
+            }
+
+            self.sync.bump_deck(incoming_idx);
+            let outgoing_epoch = self.sync.deck_epoch(current_idx);
+            self.deck(incoming_idx).player.load(uri, true, 0);
+
+            let outgoing_player = self.deck(current_idx).player.clone();
+            let sync = self.sync.clone();
+            let wait_dur = Duration::from_secs_f32(outro_secs + 1.2);
+            std::thread::spawn(move || {
+                std::thread::sleep(wait_dur);
+                if sync.deck_epoch(current_idx) == outgoing_epoch {
+                    outgoing_player.stop();
+                }
+            });
+
+            return Ok(());
+        }
+
+        let active_idx = *self.active_deck.read().unwrap();
+        let other_idx = 1 - active_idx;
+        self.sync.bump_deck(active_idx);
+        self.sync.bump_deck(other_idx);
+        self.deck(other_idx).player.stop();
 
         if !seamless || !self.gapless {
-            self.cue.clear();
+            self.deck(active_idx).cue.clear();
         }
-        self.player.load(uri, true, at.as_millis() as u32);
+        if let Ok(mut ctrl) = self.deck(active_idx).transition.write() {
+            ctrl.intro_trigger = ctrl.intro_trigger.wrapping_add(1);
+            ctrl.intro_secs = 0.0;
+            ctrl.outro_trigger = 0;
+            ctrl.outro_secs = 0.0;
+        }
+        if let Ok(mut active) = self.active_id.write() {
+            *active = Some(track_id.to_owned());
+        }
+        self.deck(active_idx)
+            .player
+            .load(uri, true, at.as_millis() as u32);
         Ok(())
     }
 
     fn load_paused_at(&self, track_id: &str, at: Duration) -> Result<()> {
         let uri = track_uri(track_id)?;
+        let active_idx = *self.active_deck.read().unwrap();
+        let other_idx = 1 - active_idx;
+        self.sync.bump_deck(active_idx);
+        self.sync.bump_deck(other_idx);
+        self.deck(other_idx).player.stop();
 
-        self.cue.clear();
-        self.player.load(uri, false, at.as_millis() as u32);
+        self.deck(active_idx).cue.clear();
+        if let Ok(mut ctrl) = self.deck(active_idx).transition.write() {
+            ctrl.intro_trigger = ctrl.intro_trigger.wrapping_add(1);
+            ctrl.intro_secs = 0.0;
+            ctrl.outro_trigger = 0;
+            ctrl.outro_secs = 0.0;
+        }
+        if let Ok(mut active) = self.active_id.write() {
+            *active = Some(track_id.to_owned());
+        }
+        self.deck(active_idx)
+            .player
+            .load(uri, false, at.as_millis() as u32);
         Ok(())
     }
 
     fn preload(&self, track_id: &str) -> Result<()> {
-        self.player.preload(track_uri(track_id)?);
+        let active_idx = *self.active_deck.read().unwrap();
+        let is_trans = self.current_transition_config().is_enabled();
+        let target_idx = if is_trans { 1 - active_idx } else { active_idx };
+        self.deck(target_idx).player.preload(track_uri(track_id)?);
         Ok(())
     }
 
     fn play(&self) {
-        self.player.play();
+        self.deck_a.player.play();
+        self.deck_b.player.play();
     }
 
     fn pause(&self) {
-        self.player.pause();
+        self.deck_a.player.pause();
+        self.deck_b.player.pause();
     }
 
     fn seek(&self, position: Duration) {
-        self.player.seek(position.as_millis() as u32);
-        self.cue.clear();
+        let active_idx = *self.active_deck.read().unwrap();
+        let other_idx = 1 - active_idx;
+        self.sync.bump_deck(other_idx);
+        self.deck(other_idx).player.stop();
+        if let Ok(mut ctrl) = self.deck(active_idx).transition.write() {
+            ctrl.intro_trigger = ctrl.intro_trigger.wrapping_add(1);
+            ctrl.intro_secs = 0.0;
+            ctrl.outro_trigger = 0;
+            ctrl.outro_secs = 0.0;
+        }
+        self.deck(active_idx)
+            .player
+            .seek(position.as_millis() as u32);
+        self.deck(active_idx).cue.clear();
     }
 
     fn set_gain(&self, gain: f32) {
         self.volume.set(gain);
+    }
+
+    fn set_transition(&self, transition: TransitionConfig) {
+        if let Ok(mut ctrl) = self.deck_a.transition.write() {
+            ctrl.config = transition;
+        }
+        if let Ok(mut ctrl) = self.deck_b.transition.write() {
+            ctrl.config = transition;
+        }
+    }
+
+    fn start_outro(&self, remaining: Duration) -> bool {
+        if !self.current_transition_config().is_enabled() {
+            return false;
+        }
+        let active_idx = *self.active_deck.read().unwrap();
+        if let Ok(mut ctrl) = self.deck(active_idx).transition.write() {
+            ctrl.outro_trigger = ctrl.outro_trigger.wrapping_add(1);
+            ctrl.outro_secs = remaining.as_secs_f32().clamp(0.5, 12.0);
+        }
+        true
     }
 
     fn spectrum(&self) -> Spectrum {
@@ -228,6 +467,14 @@ impl MusicPlayer for Engine {
 
     fn set_gain(&self, gain: f32) {
         self.set_gain(gain);
+    }
+
+    fn set_transition(&self, transition: TransitionConfig) {
+        self.set_transition(transition);
+    }
+
+    fn start_outro(&self, remaining: Duration) -> bool {
+        self.start_outro(remaining)
     }
 
     fn spectrum(&self) -> Option<Spectrum> {

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -74,6 +78,62 @@ pub struct Track {
     pub tags: Vec<String>,
     pub languages: Vec<String>,
     pub credits: Vec<Credit>,
+}
+
+impl Default for Track {
+    fn default() -> Self {
+        Self {
+            id: None,
+            name: String::new(),
+            playable: true,
+            artists: String::new(),
+            artist_refs: Vec::new(),
+            album: String::new(),
+            album_id: None,
+            cover: None,
+            duration: Duration::ZERO,
+            added_at: None,
+            added_by: None,
+            playcount: None,
+            popularity: 0,
+            explicit: false,
+            track_number: 1,
+            disc_number: 1,
+            tags: Vec::new(),
+            languages: Vec::new(),
+            credits: Vec::new(),
+        }
+    }
+}
+
+impl Track {
+    pub fn simple(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        artist: impl Into<String>,
+        album: impl Into<String>,
+        cover: impl Into<String>,
+        duration: Duration,
+        explicit: bool,
+    ) -> Self {
+        let name = name.into();
+        let artist = artist.into();
+        Self {
+            id: Some(id.into()),
+            name,
+            playable: true,
+            artists: artist.clone(),
+            artist_refs: vec![ArtistRef {
+                name: artist,
+                id: None,
+            }],
+            album: album.into(),
+            cover: Some(cover.into()),
+            duration,
+            explicit,
+            ..Default::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

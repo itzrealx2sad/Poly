@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -16,8 +20,8 @@ const MAX_START_DRIFT_SECONDS: u64 = 2;
 const MAX_TEXT_UTF16_UNITS: usize = 128;
 /// What the status says when it names the music rather than a service.
 const MUSIC: &str = "Music";
-/// Where the Sonora button sends a friend who presses it.
-const SONORA_URL: &str = "https://sonorahq.org";
+/// Where the Poly button sends a friend who presses it.
+const POLY_URL: &str = "https://github.com/itzrealx2sad/Poly";
 
 struct Attached {
     _discord: Entity<Discord>,
@@ -531,8 +535,8 @@ fn buttons(
     }
     if settings.discord_sonora_button() {
         buttons.push(Button {
-            label: "Get Sonora".to_string(),
-            url: SONORA_URL.to_string(),
+            label: "Get Poly".to_string(),
+            url: POLY_URL.to_string(),
         });
     }
     (!buttons.is_empty()).then_some(buttons)

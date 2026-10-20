@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use anyhow::{Context as _, Result, bail};
 use librespot_core::Session;
 use serde::{Deserialize, Deserializer};
@@ -202,6 +206,10 @@ struct Artwork {
 #[derive(Deserialize)]
 struct Source {
     url: String,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -403,11 +411,19 @@ fn shows(cover: &str) -> bool {
 }
 
 fn image(artwork: &Artwork) -> Option<String> {
-    artwork
-        .sources
-        .first()
-        .map(|source| source.url.clone())
-        .filter(|url| !url.is_empty())
+    let source = artwork.sources.iter().max_by_key(|source| {
+        if let Some(dim) = source.width.or(source.height) {
+            return dim;
+        }
+        if source.url.contains("b273") {
+            640
+        } else if source.url.contains("1e02") {
+            300
+        } else {
+            1
+        }
+    })?;
+    (!source.url.is_empty()).then(|| source.url.clone())
 }
 
 fn joined(artists: &[ArtistRef]) -> String {

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 mod artist;
 mod catalog;
 mod cover;
@@ -58,7 +62,7 @@ pub use scrobble::{ScrobbleRow, ScrobbleState, Scrobbling};
 pub use search::{AlbumHit, ArtistHit, Hit, Kind, PlaylistHit, Search};
 pub use session::{Failure, ProviderInfo, Session, SessionEvent, SessionState};
 pub use settings::{
-    AppSettings, DiscordName, FilterValue, FullscreenControlsAutohide, Reloaded,
+    AppSettings, CrossfadeMode, DiscordName, FilterValue, FullscreenControlsAutohide, Reloaded,
     RomanizationScripts, SYSTEM_FONT, SideTab, remember_window, window_placement,
 };
 pub use song::SongDetail;
@@ -67,7 +71,10 @@ pub use toast::{Outcome, Target, Toast, Toasts};
 pub use updates::{Release, UpdateState, Updates};
 pub use usage::Usage;
 pub use wake::Wake;
-pub use window_shape::{apply_window_rounding, install_rounded_window_hook};
+pub use window_shape::{
+    apply_window_backdrop, apply_window_rounding, install_backdrop_window_hook,
+    install_rounded_window_hook,
+};
 
 use std::future::Future;
 use std::sync::Arc;

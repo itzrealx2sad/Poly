@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::rc::Rc;
 
 use gpui::prelude::*;
@@ -44,6 +48,7 @@ impl Shape {
 /// each stand alone.
 enum Rows {
     Tracks(Rc<Vec<Track>>),
+    #[allow(dead_code)]
     Mixed(Rc<Vec<GenreItem>>),
 }
 
@@ -103,6 +108,7 @@ impl Picks {
 
     /// A deck of shelf items rather than tracks: each row plays or opens on its own, so
     /// `on_start` goes unused, and `on_context_menu` still names the row by its place.
+    #[allow(dead_code)]
     pub(crate) fn mixed(
         id: &'static str,
         items: Rc<Vec<GenreItem>>,

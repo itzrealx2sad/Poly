@@ -1,12 +1,16 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::prelude::*;
 use gpui::{App, Pixels, px};
 
 use crate::theme::ActiveTheme as _;
 
 /// How much of the popover colour a glass control keeps over what it blurs.
-pub const GLASS_FILL: f32 = 0.2;
+pub const GLASS_FILL: f32 = 0.58;
 /// How hard a glass control blurs what is behind it.
-pub const GLASS_BLUR: Pixels = px(8.);
+pub const GLASS_BLUR: Pixels = px(28.);
 
 /// Whether a surface that only frosts for the look of it should frost at all. A backdrop blur
 /// is the priciest thing the renderer does per frame, so the setting turns those off and each

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 //! The Windows and macOS hook that lets [`crate::AppSettings::window_rounding`] reach the real
 //! window. The `DwmSetWindowAttribute` and AppKit toolbar calls are platform code only `sonora`
 //! links against, so it installs the closure here once at startup. `views` calls
@@ -20,9 +24,24 @@ pub fn install_rounded_window_hook(apply: impl Fn(&Window, Rounding) + 'static, 
     cx.set_global(RoundedWindowHook(Box::new(apply)));
 }
 
-/// Applies the window-rounding preference to the live window, if a hook is installed.
 pub fn apply_window_rounding(window: &Window, rounding: Rounding, cx: &App) {
     if let Some(hook) = cx.try_global::<RoundedWindowHook>() {
         (hook.0)(window, rounding);
+    }
+}
+
+type ApplyBackdrop = Box<dyn Fn(&Window, bool, bool)>;
+
+struct BackdropWindowHook(ApplyBackdrop);
+
+impl Global for BackdropWindowHook {}
+
+pub fn install_backdrop_window_hook(apply: impl Fn(&Window, bool, bool) + 'static, cx: &mut App) {
+    cx.set_global(BackdropWindowHook(Box::new(apply)));
+}
+
+pub fn apply_window_backdrop(window: &Window, blur_window: bool, transparent: bool, cx: &App) {
+    if let Some(hook) = cx.try_global::<BackdropWindowHook>() {
+        (hook.0)(window, blur_window, transparent);
     }
 }

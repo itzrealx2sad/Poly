@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 mod aside;
 mod notice;
 mod player_bar;
@@ -99,6 +103,7 @@ impl Chrome {
             .unwrap_or_default()
     }
 
+    #[allow(dead_code)]
     pub fn reserved_right(cx: &App) -> Pixels {
         Self::get(cx).reserved_right
     }

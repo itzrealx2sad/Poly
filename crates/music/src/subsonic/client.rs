@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -110,11 +114,11 @@ impl SubsonicClient {
     }
 
     fn cover(&self, art: Option<&str>, fallback: &str) -> Option<String> {
-        self.cover_url(art.filter(|id| !id.is_empty()).unwrap_or(fallback), 300)
+        self.cover_url(art.filter(|id| !id.is_empty()).unwrap_or(fallback), 600)
     }
 
     fn cover_large(&self, art: Option<&str>, fallback: &str) -> Option<String> {
-        self.cover_url(art.filter(|id| !id.is_empty()).unwrap_or(fallback), 600)
+        self.cover_url(art.filter(|id| !id.is_empty()).unwrap_or(fallback), 1200)
     }
 
     fn song(&self, song: Child) -> Track {

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::HashSet;
 use std::future::Future;
 use std::path::PathBuf;
@@ -368,6 +372,11 @@ pub struct Playback {
     level: f32,
     normalisation: bool,
     gapless: bool,
+    automix: bool,
+    crossfade: bool,
+    crossfade_mode: crate::CrossfadeMode,
+    crossfade_duration: u32,
+    outro_triggered: bool,
     /// Shared with every engine started here, so a change reaches the output without a restart.
     equalizer: Equalizer,
     repeat: Repeat,
@@ -471,6 +480,10 @@ impl Playback {
         let level = settings.read(cx).volume();
         let normalisation = settings.read(cx).normalisation();
         let gapless = settings.read(cx).gapless();
+        let automix = settings.read(cx).automix();
+        let crossfade = settings.read(cx).crossfade();
+        let crossfade_mode = settings.read(cx).crossfade_mode();
+        let crossfade_duration = settings.read(cx).crossfade_duration();
         let equalizer = Equalizer::new(
             settings.read(cx).equalizer(),
             &settings.read(cx).equalizer_gains(),
@@ -491,6 +504,11 @@ impl Playback {
             level,
             normalisation,
             gapless,
+            automix,
+            crossfade,
+            crossfade_mode,
+            crossfade_duration,
+            outro_triggered: false,
             equalizer,
             repeat,
             radio,
@@ -528,6 +546,7 @@ impl Playback {
         if let Some(factory) = playback.session.read(cx).local_playback() {
             playback.start_local_engine(factory, cx);
         }
+        playback.sync_transition();
         playback
     }
 
@@ -581,7 +600,8 @@ impl Playback {
         if self.engine_for(id).is_none() {
             return;
         }
-        if !track.playable || self.track.as_ref().and_then(|track| track.id.as_deref()) == Some(id)
+        if !track.playable
+            || (self.track.as_ref().and_then(|track| track.id.as_deref()) == Some(id) && !segue)
         {
             return;
         }
@@ -646,6 +666,7 @@ impl Playback {
         self.position = at;
         self.clock.reset(at, false);
         self.preloaded = None;
+        self.outro_triggered = false;
         self.resume_at = None;
         self.seek_in_flight = None;
         self.seek_next = None;
@@ -1240,11 +1261,53 @@ impl Playback {
         }));
     }
 
-    /// Skips to the next playable track.
     pub fn next(&mut self, cx: &mut Context<Self>) {
         self.fetch = None;
         let start = self.burst();
-        self.follow_queue(start, cx);
+        if self.repeat == Repeat::One {
+            if let Some(track) = self.track.clone() {
+                self.load_after(&track, start, cx);
+                return;
+            }
+        }
+        if self.queue.read(cx).has_next() {
+            self.follow_queue(start, cx);
+            return;
+        }
+        match self.repeat {
+            Repeat::One => {
+                if let Some(track) = self.track.clone() {
+                    self.load_after(&track, start, cx);
+                }
+            }
+            Repeat::All => {
+                if let Some(track) = self.queue.update(cx, |queue, cx| queue.rewind(cx)) {
+                    self.follow_after(track, start, cx);
+                }
+            }
+            Repeat::Off => {
+                if self.radio || self.queue.read(cx).shuffle() {
+                    let seed = self
+                        .track
+                        .clone()
+                        .filter(|seed| seed.id.as_deref().is_some_and(|id| self.stations(id, cx)));
+                    match seed {
+                        Some(seed) => self.extend_radio(&seed, cx),
+                        None => {
+                            if self.queue.read(cx).shuffle() {
+                                if let Some(track) = self.queue.update(cx, |queue, cx| queue.rewind(cx)) {
+                                    self.follow_after(track, start, cx);
+                                    return;
+                                }
+                            }
+                            self.follow_queue(start, cx);
+                        }
+                    }
+                } else {
+                    self.follow_queue(start, cx);
+                }
+            }
+        }
     }
 
     /// Removing tracks from queue
@@ -1280,21 +1343,53 @@ impl Playback {
         let Some(duration) = self.track.as_ref().map(|track| track.duration) else {
             return;
         };
+        let before_end = self.effective_preload_window();
         if duration.is_zero()
             || self.state != PlaybackState::Playing
-            || duration.saturating_sub(position) > PRELOAD_BEFORE_END
+            || duration.saturating_sub(position) > before_end
         {
             return;
         }
         self.preload_upcoming(true, cx);
     }
 
-    /// Asks the engine to fetch the track that plays after this one. With `segue` it is also
-    /// lined up to follow gaplessly, which waits for the end because the queue can still change.
+    fn check_transition_outro(&mut self, at: Duration, cx: &mut Context<Self>) {
+        if self.outro_triggered {
+            return;
+        }
+        let Some(duration) = self.track.as_ref().map(|track| track.duration) else {
+            return;
+        };
+        if duration.is_zero() || self.state != PlaybackState::Playing {
+            return;
+        }
+        let remaining = duration.saturating_sub(at);
+        let trans_dur = self.transition_config().duration_for(Some(duration));
+        let has_next = self.repeat == Repeat::One
+            || self.repeat == Repeat::All
+            || self.queue.read(cx).has_next()
+            || self.radio;
+        if trans_dur > Duration::ZERO
+            && remaining <= trans_dur
+            && remaining > Duration::ZERO
+            && has_next
+        {
+            self.outro_triggered = true;
+            let advance_now = self
+                .active_engine()
+                .is_some_and(|engine| engine.start_outro(remaining));
+            if advance_now
+                && let Some(ended) = self.track.clone()
+            {
+                self.advance(Some(ended), cx);
+            }
+        }
+    }
+
     fn preload_upcoming(&mut self, segue: bool, cx: &Context<Self>) {
-        let next = match self.repeat != Repeat::One {
-            true => self.queue.read(cx).upcoming().next().cloned(),
-            false => None,
+        let next = match self.repeat == Repeat::One {
+            true => self.track.clone(),
+            false => self.queue.read(cx).upcoming().next().cloned(),
         };
         let Some(next) = next else {
             self.preloaded = None;
@@ -1514,8 +1609,6 @@ impl Playback {
         self.set_repeat(repeat, cx);
     }
 
-    /// Decides what follows a track that ended: the same one on repeat-one, the queue's start
-    /// on repeat-all, more radio when it is on and the queue ran out, else the next in line.
     fn advance(&mut self, ended: Option<Track>, cx: &mut Context<Self>) {
         match self.repeat {
             Repeat::One => match ended {
@@ -1528,17 +1621,24 @@ impl Playback {
                     self.follow_after(track, Start::Segue, cx);
                 }
             }
-            // The station's next stretch is on its way; playing resumes when it lands.
             _ if self.topping.is_some() && !self.queue.read(cx).has_next() => {
                 self.fetch = None;
             }
-            _ if self.radio && !self.queue.read(cx).has_next() => {
+            _ if (self.radio || self.queue.read(cx).shuffle()) && !self.queue.read(cx).has_next() => {
                 let seed = ended
                     .or_else(|| self.track.clone())
                     .filter(|seed| seed.id.as_deref().is_some_and(|id| self.stations(id, cx)));
                 match seed {
                     Some(seed) => self.extend_radio(&seed, cx),
-                    None => self.segue_queue(cx),
+                    None => {
+                        if self.queue.read(cx).shuffle() {
+                            if let Some(track) = self.queue.update(cx, |queue, cx| queue.rewind(cx)) {
+                                self.follow_after(track, Start::Segue, cx);
+                                return;
+                            }
+                        }
+                        self.segue_queue(cx);
+                    }
                 }
             }
             _ => self.segue_queue(cx),
@@ -1550,7 +1650,6 @@ impl Playback {
         self.follow_queue(Start::Segue, cx);
     }
 
-    /// Appends the seed's radio to the queue and moves on, or just moves on if it fails.
     fn extend_radio(&mut self, seed: &Track, cx: &mut Context<Self>) {
         let Some(id) = seed.id.clone() else {
             return self.next(cx);
@@ -1577,8 +1676,13 @@ impl Playback {
                     this.leave_station();
                     this.follow_queue(Start::Segue, cx);
                 }
-                Ok(_) => log::warn!("playback: radio returned no tracks"),
-                Err(error) => log::warn!("playback: cannot extend radio: {error:#}"),
+                Ok(_) | Err(_) => {
+                    if this.queue.read(cx).shuffle() || this.repeat == Repeat::All {
+                        if let Some(track) = this.queue.update(cx, |queue, cx| queue.rewind(cx)) {
+                            this.follow_after(track, Start::Segue, cx);
+                        }
+                    }
+                }
             })
             .ok();
         }));
@@ -1904,6 +2008,7 @@ impl Playback {
         self.position = position;
         self.clock.reset(position, false);
         self.seek_target = Some(position);
+        self.outro_triggered = false;
         match (self.state == PlaybackState::Playing, self.seek_in_flight) {
             (true, Some(_)) => self.seek_next = Some(position),
             (true, None) => {
@@ -2052,7 +2157,6 @@ impl Playback {
         cx.notify();
     }
 
-    /// Moves one band, leaving the rest of the curve as it is.
     pub fn set_equalizer_gain(&mut self, band: usize, gain: f32, cx: &mut Context<Self>) {
         let mut gains = self.equalizer.gains();
         let Some(slot) = gains.get_mut(band) else {
@@ -2060,6 +2164,13 @@ impl Playback {
         };
         *slot = gain;
         self.set_equalizer_gains(&gains, cx);
+        self.settings
+            .update(cx, |settings, cx| settings.set_equalizer_custom_gains(&gains, cx));
+    }
+
+    pub fn apply_custom_equalizer(&mut self, cx: &mut Context<Self>) {
+        let custom = self.settings.read(cx).equalizer_custom_gains();
+        self.set_equalizer_gains(&custom, cx);
     }
 
     pub fn set_gapless(&mut self, on: bool, cx: &mut Context<Self>) {
@@ -2080,6 +2191,115 @@ impl Playback {
         self.settings
             .update(cx, |settings, cx| settings.set_normalisation(on, cx));
         self.restart_engine(cx);
+    }
+
+    pub fn automix(&self) -> bool {
+        self.automix
+    }
+
+    pub fn set_automix(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.automix == on {
+            return;
+        }
+        self.automix = on;
+        let automix = self.automix;
+        if on && self.crossfade {
+            self.crossfade = false;
+            self.settings
+                .update(cx, |settings, cx| settings.set_crossfade(false, cx));
+        }
+        self.settings
+            .update(cx, |settings, cx| settings.set_automix(automix, cx));
+        self.sync_transition();
+        self.preload_next(self.position, cx);
+        cx.notify();
+    }
+
+    pub fn crossfade(&self) -> bool {
+        self.crossfade
+    }
+
+    pub fn set_crossfade(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.crossfade == on {
+            return;
+        }
+        self.crossfade = on;
+        let crossfade = self.crossfade;
+        if on && self.automix {
+            self.automix = false;
+            self.settings
+                .update(cx, |settings, cx| settings.set_automix(false, cx));
+        }
+        self.settings
+            .update(cx, |settings, cx| settings.set_crossfade(crossfade, cx));
+        self.sync_transition();
+        self.preload_next(self.position, cx);
+        cx.notify();
+    }
+
+    pub fn crossfade_mode(&self) -> crate::CrossfadeMode {
+        self.crossfade_mode
+    }
+
+    pub fn set_crossfade_mode(&mut self, mode: crate::CrossfadeMode, cx: &mut Context<Self>) {
+        if self.crossfade_mode == mode {
+            return;
+        }
+        self.crossfade_mode = mode;
+        let crossfade_mode = self.crossfade_mode;
+        self.settings
+            .update(cx, |settings, cx| settings.set_crossfade_mode(crossfade_mode, cx));
+        self.sync_transition();
+        self.preload_next(self.position, cx);
+        cx.notify();
+    }
+
+    pub fn crossfade_duration(&self) -> u32 {
+        self.crossfade_duration
+    }
+
+    pub fn set_crossfade_duration(&mut self, seconds: u32, cx: &mut Context<Self>) {
+        let clamped = seconds.clamp(1, 12);
+        if self.crossfade_duration == clamped {
+            return;
+        }
+        self.crossfade_duration = clamped;
+        let crossfade_duration = self.crossfade_duration;
+        self.settings
+            .update(cx, |settings, cx| settings.set_crossfade_duration(crossfade_duration, cx));
+        self.sync_transition();
+        self.preload_next(self.position, cx);
+        cx.notify();
+    }
+
+    fn transition_config(&self) -> music::TransitionConfig {
+        if self.automix {
+            music::TransitionConfig::AutoMix
+        } else if self.crossfade {
+            match self.crossfade_mode {
+                crate::CrossfadeMode::Auto => music::TransitionConfig::CrossfadeAuto,
+                crate::CrossfadeMode::Manual => {
+                    music::TransitionConfig::CrossfadeManual(self.crossfade_duration)
+                }
+            }
+        } else {
+            music::TransitionConfig::None
+        }
+    }
+
+    fn sync_transition(&self) {
+        let config = self.transition_config();
+        if let Some(engine) = &self.engine {
+            engine.set_transition(config);
+        }
+        if let Some(engine) = &self.local_engine {
+            engine.set_transition(config);
+        }
+    }
+
+    fn effective_preload_window(&self) -> Duration {
+        let duration = self.track.as_ref().map(|track| track.duration);
+        PRELOAD_BEFORE_END.max(self.transition_config().preload_window(duration))
     }
 
     /// Whether the current track plays through the local engine.
@@ -2186,6 +2406,7 @@ impl Playback {
 
         self.listen(events, false, cx);
         self.engine = Some(engine);
+        self.sync_transition();
         self.refused = None;
         if !self.local_active() {
             self.state = PlaybackState::Idle;
@@ -2208,6 +2429,7 @@ impl Playback {
 
         self.listen(events, true, cx);
         self.local_engine = Some(engine);
+        self.sync_transition();
         self.prepare_resume(cx);
     }
 
@@ -2328,6 +2550,7 @@ impl Playback {
                 }
                 self.remember(false, cx);
                 self.preload_next(at, cx);
+                self.check_transition_outro(at, cx);
                 if failed {
                     self.follow_up_seek(cx);
                 }
@@ -2341,7 +2564,14 @@ impl Playback {
                     track.duration = duration;
                 }
             }
-            BackendEvent::Ended { .. } => {
+            BackendEvent::Ended { id, .. } => {
+                if let Some(ended_id) = id.as_deref() {
+                    if let Some(current_id) = self.track.as_ref().and_then(|t| t.id.as_deref()) {
+                        if ended_id != current_id {
+                            return;
+                        }
+                    }
+                }
                 let ended = self.track.take();
                 self.state = PlaybackState::Idle;
                 self.position = Duration::ZERO;

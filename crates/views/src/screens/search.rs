@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -15,7 +19,7 @@ use ui::Input;
 use crate::chrome::Chrome;
 use crate::shared::menus::{ItemMenu, album_menu, artist_menu, playlist_menu};
 use state::{
-    AlbumHit, ArtistHit, Genres, Hit, Kind, Network, Playback, PlaylistHit, Search, Sonora,
+    AlbumHit, ArtistHit, Genres, Hit, Kind, Network, Origin, Playback, PlaylistHit, Search, Sonora,
 };
 use ui::ActiveTheme as _;
 use ui::{
@@ -244,10 +248,10 @@ impl SearchView {
         match hit {
             Hit::Song(track) => {
                 let current = track.id.is_some() && track.id == self.playback_status.0;
-                self.playback.update(cx, |playback, cx| match current {
-                    true => playback.toggle_play(cx),
-                    false => playback.play_radio(&track, cx),
-                });
+                match current {
+                    true => self.playback.update(cx, |playback, cx| playback.toggle_play(cx)),
+                    false => self.play_song(&track, cx),
+                }
             }
             Hit::Artist(artist) => {
                 if let Some(id) = artist.id {
@@ -257,6 +261,14 @@ impl SearchView {
             Hit::Album(album) => navigate(Destination::Album(album.id.into()), cx),
             Hit::Playlist(list) => navigate(Destination::Playlist(list.id.into()), cx),
         }
+    }
+
+    fn play_song(&self, track: &Track, cx: &mut App) {
+        let query = self.search.read(cx).query();
+        let origin = Origin::radio(track.id.clone().unwrap_or_default())
+            .named(format!("Search: {query}"));
+        self.playback
+            .update(cx, |p, cx| p.start(vec![track.clone()], 0, Some(origin), cx));
     }
 
     fn deselect_hit(&mut self, _: &Deselect, window: &mut Window, cx: &mut Context<Self>) {
@@ -462,11 +474,9 @@ impl SearchView {
                 let playing = current && self.playback_status.1 == Some(true);
                 let track = track.clone();
                 let play: Play = Box::new(move |_, _, cx| {
-                    me.update(cx, |this, cx| {
-                        this.playback.update(cx, |playback, cx| match current {
-                            true => playback.toggle_play(cx),
-                            false => playback.play_radio(&track, cx),
-                        });
+                    me.update(cx, |this, cx| match current {
+                        true => this.playback.update(cx, |playback, cx| playback.toggle_play(cx)),
+                        false => this.play_song(&track, cx),
                     })
                     .ok();
                 });
@@ -822,9 +832,7 @@ fn pressed(
 
     move |_, _, cx| {
         me.update(cx, |this, cx| match &target {
-            Press::Song(track) => this
-                .playback
-                .update(cx, |playback, cx| playback.play_radio(track, cx)),
+            Press::Song(track) => this.play_song(track, cx),
             Press::Artist(id) => navigate(Destination::Artist(id.clone().into()), cx),
             Press::Album(id) => navigate(Destination::Album(id.clone().into()), cx),
             Press::Playlist(id) => navigate(Destination::Playlist(id.clone().into()), cx),

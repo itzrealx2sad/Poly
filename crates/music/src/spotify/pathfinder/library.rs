@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::HashSet;
 
 use anyhow::{Context as _, Result, ensure};
@@ -117,7 +121,7 @@ fn cover(value: &Value, pointer: &str) -> Option<String> {
                 url,
             ))
         })
-        .min_by_key(|(width, _)| width.abs_diff(64))
+        .max_by_key(|(width, _)| *width)
         .map(|(_, url)| url.to_owned())
 }
 

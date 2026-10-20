@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow};
@@ -287,17 +291,8 @@ fn artists(artists: &Artists) -> (String, Vec<ArtistRef>) {
     (names, refs)
 }
 
-fn cover(sources: &[Image], large: bool) -> Option<String> {
-    const HEADER: u32 = 300;
-
-    let source = match large {
-        true => sources
-            .iter()
-            .filter(|source| source.height >= HEADER)
-            .min_by_key(|source| source.height)
-            .or_else(|| sources.iter().max_by_key(|source| source.height)),
-        false => sources.iter().min_by_key(|source| source.height),
-    }?;
+fn cover(sources: &[Image], _large: bool) -> Option<String> {
+    let source = sources.iter().max_by_key(|source| source.height)?;
     non_empty(&source.url).map(str::to_owned)
 }
 

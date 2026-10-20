@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Entity, Pixels, Point, Render, ScrollHandle, SharedString,
@@ -594,6 +598,8 @@ impl DetailView {
                 tag: "detail-also-like",
                 place: 0,
                 title: t!("album-also-like"),
+                icon: None,
+                badge: None,
                 count: match tab {
                     RailTab::Albums => albums,
                     RailTab::Artists => artists,
@@ -601,6 +607,7 @@ impl DetailView {
                 tile: card,
                 columns,
                 tabs,
+                trailing: None,
             },
             window,
             cx,

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::HashSet;
 
 use anyhow::{Context as _, Result};
@@ -268,16 +272,8 @@ fn date(date: &PathDate) -> String {
     }
 }
 
-fn cover(sources: &[Image], large: bool) -> Option<String> {
-    let picked = match large {
-        true => sources
-            .iter()
-            .filter(|image| image.height >= 300)
-            .min_by_key(|image| image.height)
-            .or_else(|| sources.iter().max_by_key(|image| image.height)),
-        false => sources.iter().min_by_key(|image| image.height),
-    }?;
-
+fn cover(sources: &[Image], _large: bool) -> Option<String> {
+    let picked = sources.iter().max_by_key(|image| image.height)?;
     Some(picked.url.clone())
 }
 

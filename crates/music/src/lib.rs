@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 pub mod apple;
 pub mod artwork;
 mod audio;
@@ -25,6 +29,7 @@ mod spectrum;
 pub mod spotify;
 mod stream;
 pub mod subsonic;
+pub mod transition;
 mod trim;
 pub mod trouble;
 pub mod youtube;
@@ -51,6 +56,7 @@ pub use models::{
     UserDetail, UserProfile, Voice, WritingSystem,
 };
 pub use spectrum::Spectrum;
+pub use transition::TransitionConfig;
 
 pub const LOCAL_TRACK_PREFIX: &str = "local:";
 pub const LOCAL_ALBUM_PREFIX: &str = "local-album:";
@@ -418,24 +424,17 @@ impl PlaybackEvent {
 /// Transport control of one engine. Every call is fire-and-forget: the outcome arrives as a
 /// `PlaybackEvent`, never as a return value.
 pub trait Player: Send + Sync {
-    /// Fetches a track and plays it from `at`. A `seamless` load is a queue segue: a gapless
-    /// engine keeps what it has queued so the join has no gap, any other load drops it.
     fn load(&self, track_id: &str, at: Duration, seamless: bool) -> Result<()>;
-
-    /// Fetches a track and leaves it paused at `at`, ready for `play`.
     fn load_paused_at(&self, track_id: &str, at: Duration) -> Result<()>;
-
-    /// Fetches a track ahead of time so a later `load` starts at once. `segue` marks the next
-    /// queue item, which a gapless engine may already line up behind the current one.
     fn preload(&self, track_id: &str, segue: bool) -> Result<()>;
     fn play(&self);
     fn pause(&self);
-
-    /// Moves to `position`. While loading, the track starts there instead; while playing, a
-    /// `Seeked` event follows once audio from there reaches the output.
     fn seek(&self, position: Duration);
     fn set_gain(&self, gain: f32);
-
+    fn set_transition(&self, _transition: TransitionConfig) {}
+    fn start_outro(&self, _remaining: Duration) -> bool {
+        false
+    }
     fn spectrum(&self) -> Option<Spectrum> {
         None
     }

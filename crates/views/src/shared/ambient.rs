@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 //! The ambient background: a flowing colour field behind fullscreen, five soft
 //! blobs under a heavy blur, darkened so lyrics stay readable. `Root` owns the
 //! one entity, paints it under everything, title bar included, and paints no
@@ -44,7 +48,7 @@ const DOWNSCALE: f32 = 4.;
 /// it. The overlay is folded into the colours rather than painted as a sheet of its own: over
 /// an opaque stack multiplying every layer by what it lets through is the same picture, and a
 /// black sheet this strong was most of what a see-through window's alpha went on.
-const SHADE: f32 = 0.55;
+const SHADE: f32 = 0.20;
 
 /// One blob: base centre (fractions of the layer), diameter (fraction of the
 /// layer's smaller side), drift period in seconds, phase, drift amplitude
@@ -63,15 +67,11 @@ const SPECS: [(f32, f32, f32, f32, f32, f32, f32); BLOBS] = [
     (0.85, 0.72, 0.72, 31., 2.5, 0.12, 0.11),
 ];
 
-/// Concentric discs faking a radial falloff. They are what keeps the field smooth now that
-/// the blur stays narrow enough to run at full resolution, and at `DOWNSCALE` a disc costs a
-/// sixteenth of the fill it did at window size, so the stack can afford to be dense. The
-/// spacing left between them has to stay inside the blur's reach or they read as rings.
-const DISCS: usize = 24;
-/// Opacity ramp from the outermost disc to the core. The discs stack, so a disc is far
-/// fainter than the field it builds up to.
-const DISC_FAINT: f32 = 0.027;
-const DISC_STRONG: f32 = 0.079;
+/// Concentric discs faking a radial falloff.
+const DISCS: usize = 7;
+/// Opacity ramp from the outermost disc to the core.
+const DISC_FAINT: f32 = 0.08;
+const DISC_STRONG: f32 = 0.24;
 /// Time constant of the exponential ease onto a new palette, in seconds. The
 /// field lands within a few percent of the target after about three of these.
 const WASH: f32 = 0.8;
@@ -131,55 +131,111 @@ impl Ambient {
             l: light,
             a: 1.,
         };
-        // A dark theme gets a dark stage; lift the floor a little so the
-        // blobs stay apart from the base.
-        let floor = (0.13 + theme.background.l * 0.8).clamp(0.13, 0.30);
+        let floor = match theme.pitch_black {
+            true => 0.02,
+            false => (0.13 + theme.background.l * 0.8).clamp(0.13, 0.30),
+        };
 
         let Some(tint) = theme.tint else {
-            return [
-                neutral(floor),
-                neutral(floor + 0.025),
-                neutral(floor + 0.05),
-                neutral(floor + 0.015),
-                neutral(floor + 0.04),
-            ];
+            return match theme.pitch_black {
+                true => [
+                    neutral(0.02),
+                    neutral(0.04),
+                    neutral(0.05),
+                    neutral(0.02),
+                    neutral(0.03),
+                ],
+                false => [
+                    neutral(floor),
+                    neutral(floor + 0.025),
+                    neutral(floor + 0.05),
+                    neutral(floor + 0.015),
+                    neutral(floor + 0.04),
+                ],
+            };
         };
         let accent = theme.accent(tint);
-        let base = Hsla {
-            h: accent.h,
-            s: (accent.s * 0.9 + 0.04).clamp(0.45, 0.75),
-            l: (0.40 + (accent.l - 0.45) * 0.5).clamp(0.28, 0.52),
-            a: 1.,
-        };
-        let second = match theme.tint_secondary {
-            Some(second) => Hsla {
-                h: second.h,
-                s: (second.s * 0.9).clamp(0.4, 0.72),
-                l: (0.38 + (second.l - 0.45) * 0.5).clamp(0.28, 0.5),
+        let is_neon_mono = tint.s < 0.28;
+        let base = match is_neon_mono {
+            true => Hsla {
+                h: accent.h,
+                s: accent.s.clamp(0.06, 0.32),
+                l: (0.78 + (accent.l - 0.5) * 0.3).clamp(0.68, 0.94),
                 a: 1.,
             },
-            None => neutral(floor + 0.03),
+            false => Hsla {
+                h: accent.h,
+                s: (accent.s * 0.9 + 0.04).clamp(0.45, 0.75),
+                l: (0.40 + (accent.l - 0.45) * 0.5).clamp(0.28, 0.52),
+                a: 1.,
+            },
         };
-        [
-            base,
-            Hsla {
-                l: (base.l + 0.14).clamp(0.3, 0.62),
-                s: (base.s - 0.08).clamp(0.4, 0.75),
-                ..base
+        let second = match theme.tint_secondary {
+            Some(second) => match is_neon_mono {
+                true => Hsla {
+                    h: second.h,
+                    s: second.s.clamp(0.08, 0.36),
+                    l: (0.72 + (second.l - 0.5) * 0.3).clamp(0.58, 0.88),
+                    a: 1.,
+                },
+                false => Hsla {
+                    h: second.h,
+                    s: (second.s * 0.9).clamp(0.4, 0.72),
+                    l: (0.38 + (second.l - 0.45) * 0.5).clamp(0.28, 0.5),
+                    a: 1.,
+                },
             },
-            second,
-            Hsla {
-                l: (base.l - 0.13).clamp(0.18, 0.45),
-                s: (base.s + 0.04).clamp(0.45, 0.8),
-                ..base
+            None => match theme.pitch_black {
+                true => Hsla {
+                    h: accent.h,
+                    s: 0.08,
+                    l: 0.03,
+                    a: 1.,
+                },
+                false => neutral(floor + 0.03),
             },
-            Hsla {
-                h: (base.h + 0.97).rem_euclid(1.),
-                l: (base.l - 0.16).clamp(0.16, 0.4),
-                s: (base.s - 0.02).clamp(0.4, 0.78),
-                ..base
-            },
-        ]
+        };
+        match is_neon_mono {
+            true => [
+                base,
+                Hsla {
+                    l: (base.l + 0.06).clamp(0.72, 0.96),
+                    s: (base.s + 0.04).clamp(0.08, 0.38),
+                    ..base
+                },
+                second,
+                Hsla {
+                    l: if theme.pitch_black { 0.02 } else { 0.16 },
+                    s: 0.04,
+                    ..base
+                },
+                Hsla {
+                    l: if theme.pitch_black { 0.01 } else { 0.12 },
+                    s: 0.04,
+                    ..base
+                },
+            ],
+            false => [
+                base,
+                Hsla {
+                    l: (base.l + 0.14).clamp(0.3, 0.62),
+                    s: (base.s - 0.08).clamp(0.4, 0.75),
+                    ..base
+                },
+                second,
+                Hsla {
+                    l: (base.l - 0.13).clamp(0.18, 0.45),
+                    s: (base.s + 0.04).clamp(0.45, 0.8),
+                    ..base
+                },
+                Hsla {
+                    h: (base.h + 0.97).rem_euclid(1.),
+                    l: (base.l - 0.16).clamp(0.16, 0.4),
+                    s: (base.s - 0.02).clamp(0.4, 0.78),
+                    ..base
+                },
+            ],
+        }
     }
 }
 
@@ -249,10 +305,13 @@ impl Render for Ambient {
                     .absolute()
                     .inset_0()
                     .when_some(radius, |this, radius| this.rounded(radius))
-                    .bg(shaded(Hsla {
-                        a: 1.,
-                        ..theme.background
-                    })),
+                    .bg(match theme.pitch_black {
+                        true => Hsla { h: 0., s: 0., l: 0., a: 1. },
+                        false => shaded(Hsla {
+                            a: 1.,
+                            ..theme.background
+                        }),
+                    }),
             )
             // The blur spreads the blobs past any shape they could be cut to, so a rounded window
             // fades them out toward every edge instead. The fade sits on an unblurred layer the

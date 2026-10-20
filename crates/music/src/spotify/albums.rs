@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context as _, Result};
@@ -194,27 +198,23 @@ fn release_type(kind: AlbumType) -> ReleaseType {
 }
 
 fn cover(album: &AlbumMessage) -> Option<String> {
-    let smallest = album
+    let largest = album
         .cover_group
         .as_ref()?
         .image
         .iter()
         .filter(|image| image.has_file_id())
-        .min_by_key(|image| image.width())?;
+        .max_by_key(|image| image.width())?;
 
-    wire::image_url(smallest.file_id())
+    wire::image_url(largest.file_id())
 }
 
 fn cover_large(album: &AlbumMessage) -> Option<String> {
-    const HEADER: i32 = 300;
-
     let images = album.cover_group.as_ref()?.image.iter();
     let usable: Vec<_> = images.filter(|image| image.has_file_id()).collect();
     let picked = usable
         .iter()
-        .filter(|image| image.width() >= HEADER)
-        .min_by_key(|image| image.width())
-        .or_else(|| usable.iter().max_by_key(|image| image.width()))?;
+        .max_by_key(|image| image.width())?;
 
     wire::image_url(picked.file_id())
 }

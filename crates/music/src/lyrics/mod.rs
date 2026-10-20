@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 pub(crate) mod catalog;
 mod japanese;
 pub mod lrc;
@@ -25,6 +29,18 @@ const DRIFTED: u32 = 50;
 const TRUNCATED: u32 = 500;
 const TRUSTED: u32 = 25;
 
+pub fn sync_tier(lyrics: &Lyrics) -> u8 {
+    if lyrics.is_empty() {
+        0
+    } else if lyrics.worded() {
+        3
+    } else if lyrics.synced() {
+        2
+    } else {
+        1
+    }
+}
+
 pub fn rank(query: &LyricsQuery, hits: Vec<LyricsHit>) -> Vec<LyricsHit> {
     let mut scored: Vec<(i64, LyricsHit)> = hits
         .into_iter()
@@ -32,8 +48,9 @@ pub fn rank(query: &LyricsQuery, hits: Vec<LyricsHit>) -> Vec<LyricsHit> {
         .map(|hit| (score(query, &hit), hit))
         .collect();
     scored.sort_by(|(left_score, left), (right_score, right)| {
-        right_score
-            .cmp(left_score)
+        sync_tier(&right.lyrics)
+            .cmp(&sync_tier(&left.lyrics))
+            .then_with(|| right_score.cmp(left_score))
             .then_with(|| left.source.cmp(right.source))
             .then_with(|| left.title.cmp(&right.title))
     });

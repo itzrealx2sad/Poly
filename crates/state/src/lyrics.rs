@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -614,7 +618,22 @@ impl Lyrics {
         };
         let before = self.current().map(|hit| hit.lyrics.clone());
         let mut hits = ranked;
-        let held = keep_displayed_first(&mut hits, anchor.as_ref());
+        let held = if self.picked {
+            keep_displayed_first(&mut hits, anchor.as_ref())
+        } else if let Some(anchor) = anchor.as_ref() {
+            let anchor_tier = music::lyrics::sync_tier(&anchor.lyrics);
+            let best_tier = hits
+                .first()
+                .map(|hit| music::lyrics::sync_tier(&hit.lyrics))
+                .unwrap_or(0);
+            if anchor_tier >= best_tier {
+                keep_displayed_first(&mut hits, Some(anchor))
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         self.hits = hits;
         self.chosen = 0;
         self.picked &= held;
@@ -623,8 +642,6 @@ impl Lyrics {
         }
     }
 
-    /// Writes the unsaved answers once lookups have gone quiet for `SAVE_DELAY`. A write that
-    /// has begun always finishes, even when another answer reschedules the save.
     fn schedule_save(&mut self, cx: &mut Context<Self>) {
         self.save = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SAVE_DELAY).await;
@@ -640,16 +657,11 @@ impl Lyrics {
     }
 }
 
-/// What a sheet is worth: word-by-word beats timed, timed beats untimed.
 const WORDED: u8 = 3;
 const TIMED: u8 = 2;
 
 fn depth(lyrics: &Sheet) -> u8 {
-    match (lyrics.worded(), lyrics.synced()) {
-        (true, _) => WORDED,
-        (false, true) => TIMED,
-        (false, false) => 1,
-    }
+    music::lyrics::sync_tier(lyrics)
 }
 
 fn keep_displayed_first(hits: &mut Vec<LyricsHit>, displayed: Option<&LyricsHit>) -> bool {

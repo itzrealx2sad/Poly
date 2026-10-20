@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::cell::Cell;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -370,9 +374,6 @@ impl FullscreenView {
         };
         let cover_large = self.cover.read(cx).large();
         let local = local_id || small.as_ref().is_some_and(|url| url.starts_with("file://"));
-        // Only upgrade resolution for non-local tracks, since a local cover is always
-        // the full resolution picture. The track's own embedded cover is prioritized
-        // over the cover of its album.
         let large =
             cover_large.filter(|url| !local && small.is_some() && Some(*url) != small.as_deref());
 

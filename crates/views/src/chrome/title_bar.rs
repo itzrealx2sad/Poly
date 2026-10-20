@@ -1,7 +1,11 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use gpui::Decorations;
 use gpui::prelude::*;
-use gpui::{AnyElement, Window, div};
+use gpui::{AnyElement, Window, div, px};
 use gpui::{
     AnyView, Context, Entity, EventEmitter, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Render,
@@ -10,7 +14,6 @@ use ui::TrafficLightControls;
 use ui::WindowControls;
 use ui::{ActiveTheme as _, Button};
 
-use crate::chrome::SidebarRight;
 use router::Navigation;
 use state::{AppSettings, Sonora};
 
@@ -96,6 +99,7 @@ impl TitleBar {
         cx.notify();
     }
 
+    #[allow(dead_code)]
     fn history(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let hover = cx.theme().sidebar_accent;
         let navigation = self.navigation.read(cx);
@@ -146,6 +150,7 @@ impl TitleBar {
             )
     }
 
+    #[allow(dead_code)]
     fn lyrics_toggle(&self, open: bool, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
@@ -168,6 +173,7 @@ impl TitleBar {
             )
     }
 
+    #[allow(dead_code)]
     fn toggle(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let icon = match self.options.sidebar_open {
             true => "icons/panel-left-close.svg",
@@ -231,14 +237,6 @@ impl Render for TitleBar {
             .when(!self.options.transparent && !theme.transparent, |this| {
                 this.bg(theme.background)
             })
-            // The height is a border box, so a bar that drops its border centres its controls
-            // one pixel lower than one that keeps it. The edge is always an edge; only its
-            // colour goes, and fullscreen's controls land where the workspace's do.
-            .border_b_1()
-            .border_color(match self.options.border {
-                true => theme.title_bar_border,
-                false => gpui::transparent_black(),
-            })
             .window_control_area(gpui::WindowControlArea::Drag)
             .on_mouse_down(
                 MouseButton::Left,
@@ -276,8 +274,7 @@ impl Render for TitleBar {
                     .when(offset > Pixels::ZERO, |this| this.w(offset))
                     .when(leading, |this| {
                         this.child(window_controls(true, traffic_light))
-                    })
-                    .when(navigation, |this| this.child(self.toggle(cx))),
+                    }),
             )
             .child(
                 div()
@@ -286,28 +283,14 @@ impl Render for TitleBar {
                     .min_w_0()
                     .gap_1()
                     .items_center()
-                    .when(navigation, |this| this.child(self.history(cx)))
                     .children(content)
                     .pr_3(),
-            )
-            .when_some(
-                self.options
-                    .sidebar_right
-                    .filter(|_| SidebarRight::available(window)),
-                |this, open| {
-                    this.child(div().flex_none().pr_3().child(self.lyrics_toggle(open, cx)))
-                },
             )
             .when(decorated && !leading, |this| {
                 this.child(
                     div()
                         .flex_none()
-                        .when(cfg!(target_os = "windows") && !traffic_light, |this| {
-                            this.h_full().self_stretch()
-                        })
-                        .when(!cfg!(target_os = "windows") || traffic_light, |this| {
-                            this.pr_2()
-                        })
+                        .pr(px(14.))
                         .child(window_controls(false, traffic_light)),
                 )
             })

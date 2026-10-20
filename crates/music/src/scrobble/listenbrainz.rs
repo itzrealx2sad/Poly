@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use anyhow::{Context as _, Result, bail};
 use async_trait::async_trait;
 use reqwest::header::AUTHORIZATION;
@@ -11,7 +15,7 @@ const API: &str = "https://api.listenbrainz.org";
 const SETTINGS: &str = "https://listenbrainz.org/settings/";
 /// How many listens the endpoint takes in one call.
 const BATCH: usize = 50;
-const CLIENT: &str = "Sonora";
+const CLIENT: &str = "Poly";
 
 pub struct ListenBrainz;
 

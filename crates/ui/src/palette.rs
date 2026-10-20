@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::f32::consts::TAU;
 
 use gpui::{App, Hsla, RenderImage, Rgba, SharedString, Task};
@@ -40,19 +44,15 @@ pub fn tint(url: impl Into<SharedString>, cx: &mut App) -> Task<Option<Hsla>> {
 /// What one artwork extraction names: the hue that leads and, when the art
 /// carries a real second family, the runner-up. Sampled once per cover and
 /// shared by the theme tint and the ambient background, so the two never disagree.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct CoverPalette {
     pub primary: Option<Hsla>,
     pub secondary: Option<Hsla>,
-    /// The mean lightness of the art, over every pixel sampled rather than the
-    /// coloured ones alone. It is what names a neutral for art with no hue: a
-    /// sleeve that is nearly black and one that is nearly white both land here
-    /// with no primary, and only this tells them apart.
     pub lightness: f32,
+    pub pitch_black: bool,
+    pub neon_accent: Option<Hsla>,
 }
 
-/// Both hues of the artwork at `url` in a single pass over its pixels. A cover the
-/// artwork cache has drawn answers at once, and any other is decoded small and dropped.
 pub fn palette(url: impl Into<SharedString>, cx: &mut App) -> Task<CoverPalette> {
     sample_palette(url.into(), cx)
 }
@@ -94,83 +94,180 @@ impl Bin {
     }
 }
 
-fn sampled(pixels: &[u8]) -> CoverPalette {
-    let stride = (pixels.len() / 4 / SAMPLES).max(1);
-    let mut bins = [Bin::default(); BINS];
-    let mut sampled = 0.;
-    let mut lightness = 0.;
+struct PaletteSampler<'a> {
+    pixels: &'a [u8],
+    edge: usize,
+    bins: [Bin; BINS],
+    sampled: f32,
+    lightness: f32,
+    bright_samples: f32,
+    bright_l: f32,
+    bright_s: f32,
+    bright_h: f32,
+}
 
-    for &[blue, green, red, alpha] in pixels.as_chunks::<4>().0.iter().step_by(stride) {
-        if alpha < MIN_ALPHA {
-            continue;
+impl<'a> PaletteSampler<'a> {
+    fn new(pixels: &'a [u8]) -> Self {
+        let total_pixels = pixels.len() / 4;
+        let edge = total_pixels.isqrt().max(1);
+        Self {
+            pixels,
+            edge,
+            bins: [Bin::default(); BINS],
+            sampled: 0.,
+            lightness: 0.,
+            bright_samples: 0.,
+            bright_l: 0.,
+            bright_s: 0.,
+            bright_h: 0.,
         }
-        sampled += 1.;
-
-        let colour = Hsla::from(Rgba {
-            r: red as f32 / 255.,
-            g: green as f32 / 255.,
-            b: blue as f32 / 255.,
-            a: 1.,
-        });
-        lightness += colour.l;
-
-        if colour.s < MIN_SATURATION || colour.l < MIN_LIGHTNESS || colour.l > MAX_LIGHTNESS {
-            continue;
-        }
-
-        let index = ((colour.h * BINS as f32) as usize).min(BINS - 1);
-        // On a dark cover the little light colour is the accent, not the
-        // black around it: weight lifts with lightness so highlights win.
-        bins[index].add(colour, colour.s * (0.3 + 0.7 * colour.l));
     }
 
-    let mean = match sampled > 0. {
-        true => lightness / sampled,
-        false => 0.,
-    };
+    fn sample_pixel(&self, x: usize, y: usize) -> Option<Hsla> {
+        let idx = (y * self.edge + x) * 4;
+        if idx + 3 < self.pixels.len() {
+            let blue = self.pixels[idx];
+            let green = self.pixels[idx + 1];
+            let red = self.pixels[idx + 2];
+            let alpha = self.pixels[idx + 3];
+            if alpha >= MIN_ALPHA {
+                return Some(Hsla::from(Rgba {
+                    r: red as f32 / 255.,
+                    g: green as f32 / 255.,
+                    b: blue as f32 / 255.,
+                    a: 1.,
+                }));
+            }
+        }
+        None
+    }
 
-    let peak = (0..BINS).max_by(|&a, &b| score(&bins, a).total_cmp(&score(&bins, b)));
-    let primary = peak.filter(|&peak| score(&bins, peak) >= (sampled * MIN_SHARE).max(MIN_WEIGHT));
-    let Some(peak) = primary else {
-        return CoverPalette {
-            lightness: mean,
-            ..Default::default()
+    fn corner_lightness(&self) -> f32 {
+        let mut total = 0.;
+        let mut count = 0.;
+        let steps = [0, self.edge / 4, self.edge / 2, (3 * self.edge) / 4, self.edge.saturating_sub(1)];
+        for &x in &steps {
+            for &y in &[0, self.edge.saturating_sub(1)] {
+                if let Some(c) = self.sample_pixel(x, y) {
+                    total += c.l;
+                    count += 1.;
+                }
+            }
+        }
+        for &y in &steps[1..4] {
+            for &x in &[0, self.edge.saturating_sub(1)] {
+                if let Some(c) = self.sample_pixel(x, y) {
+                    total += c.l;
+                    count += 1.;
+                }
+            }
+        }
+        if count > 0. { total / count } else { 0. }
+    }
+
+    fn walk(&mut self) {
+        let stride = (self.pixels.len() / 4 / SAMPLES).max(1);
+        for &[blue, green, red, alpha] in self.pixels.as_chunks::<4>().0.iter().step_by(stride) {
+            if alpha < MIN_ALPHA {
+                continue;
+            }
+            self.sampled += 1.;
+            let colour = Hsla::from(Rgba {
+                r: red as f32 / 255.,
+                g: green as f32 / 255.,
+                b: blue as f32 / 255.,
+                a: 1.,
+            });
+            self.lightness += colour.l;
+            if colour.l > 0.45 {
+                self.bright_samples += 1.;
+                self.bright_l += colour.l;
+                self.bright_s += colour.s;
+                self.bright_h += colour.h;
+            }
+            if colour.s < MIN_SATURATION || colour.l < MIN_LIGHTNESS || colour.l > MAX_LIGHTNESS {
+                continue;
+            }
+            let index = ((colour.h * BINS as f32) as usize).min(BINS - 1);
+            self.bins[index].add(colour, colour.s * (0.3 + 0.7 * colour.l));
+        }
+    }
+
+    fn finish(self) -> CoverPalette {
+        let corner_l = self.corner_lightness();
+        let pitch_black = corner_l < 0.08;
+        let mean = match self.sampled > 0. {
+            true => self.lightness / self.sampled,
+            false => 0.,
         };
-    };
-
-    let mut cluster = bins[peak];
-    cluster.merge(&bins[(peak + BINS - 1) % BINS]);
-    cluster.merge(&bins[(peak + 1) % BINS]);
-    let primary = cluster.colour();
-
-    let runner = (0..BINS)
-        .filter(|&index| {
-            let gap = index.abs_diff(peak).min(BINS - index.abs_diff(peak));
-            gap >= SECONDARY_GAP
-                && score(&bins, index) >= (sampled * SECONDARY_SHARE).max(SECONDARY_WEIGHT)
-        })
-        .max_by(|&a, &b| score(&bins, a).total_cmp(&score(&bins, b)));
-    let secondary = runner
-        .and_then(|index| {
-            let mut cluster = bins[index];
-            cluster.merge(&bins[(index + BINS - 1) % BINS]);
-            cluster.merge(&bins[(index + 1) % BINS]);
-            cluster.colour()
-        })
-        .filter(|colour| {
-            primary.is_some_and(|lead| {
-                (colour.h - lead.h)
-                    .abs()
-                    .min(1. - (colour.h - lead.h).abs())
-                    >= SECONDARY_HUE
+        let peak = (0..BINS).max_by(|&a, &b| score(&self.bins, a).total_cmp(&score(&self.bins, b)));
+        let primary = peak.filter(|&peak| score(&self.bins, peak) >= (self.sampled * MIN_SHARE).max(MIN_WEIGHT));
+        let Some(peak) = primary else {
+            let neon_accent = if self.bright_samples >= 6. && pitch_black {
+                let avg_l = (self.bright_l / self.bright_samples).clamp(0.70, 0.95);
+                let avg_s = (self.bright_s / self.bright_samples).min(0.20);
+                let avg_h = if self.bright_s / self.bright_samples > 0.05 {
+                    self.bright_h / self.bright_samples
+                } else {
+                    0.55
+                };
+                Some(Hsla {
+                    h: avg_h,
+                    s: avg_s.max(0.12),
+                    l: avg_l,
+                    a: 1.,
+                })
+            } else {
+                None
+            };
+            return CoverPalette {
+                primary: None,
+                secondary: None,
+                lightness: mean,
+                pitch_black,
+                neon_accent,
+            };
+        };
+        let mut cluster = self.bins[peak];
+        cluster.merge(&self.bins[(peak + BINS - 1) % BINS]);
+        cluster.merge(&self.bins[(peak + 1) % BINS]);
+        let primary = cluster.colour();
+        let runner = (0..BINS)
+            .filter(|&index| {
+                let gap = index.abs_diff(peak).min(BINS - index.abs_diff(peak));
+                gap >= SECONDARY_GAP
+                    && score(&self.bins, index) >= (self.sampled * SECONDARY_SHARE).max(SECONDARY_WEIGHT)
             })
-        });
-
-    CoverPalette {
-        primary,
-        secondary,
-        lightness: mean,
+            .max_by(|&a, &b| score(&self.bins, a).total_cmp(&score(&self.bins, b)));
+        let secondary = runner
+            .and_then(|index| {
+                let mut cluster = self.bins[index];
+                cluster.merge(&self.bins[(index + BINS - 1) % BINS]);
+                cluster.merge(&self.bins[(index + 1) % BINS]);
+                cluster.colour()
+            })
+            .filter(|colour| {
+                primary.is_some_and(|lead| {
+                    (colour.h - lead.h)
+                        .abs()
+                        .min(1. - (colour.h - lead.h).abs())
+                        >= SECONDARY_HUE
+                })
+            });
+        CoverPalette {
+            primary,
+            secondary,
+            lightness: mean,
+            pitch_black,
+            neon_accent: None,
+        }
     }
+}
+
+fn sampled(pixels: &[u8]) -> CoverPalette {
+    let mut sampler = PaletteSampler::new(pixels);
+    sampler.walk();
+    sampler.finish()
 }
 
 fn score(bins: &[Bin; BINS], index: usize) -> f32 {

@@ -1,259 +1,165 @@
 <div align="center">
 
-<img src="./.github/readme-icon.svg" alt="" width="60" height="60">
+<img src="./assets/icons/lucide/poly-logo.svg" alt="Poly Logo" width="72" height="72">
 
-<h1>Sonora</h1>
+# Poly Windows
+
+### An enhanced, native music streaming client built with Rust and GPUI.
+**A fork of [Sonora](https://github.com/sonorahq/sonora)**
+
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square)](./COPYING)
+[![Rust: Edition 2024](https://img.shields.io/badge/Rust-Edition%202024-orange.svg?style=flat-square)](https://www.rust-lang.org/)
+[![Upstream: Sonora](https://img.shields.io/badge/Upstream-Sonora-purple.svg?style=flat-square)](https://github.com/sonorahq/sonora)
 
 <p align="center">
-  <a href="https://sonorahq.org/changelog">Changelog</a>
+  <a href="#about-the-fork">About The Fork</a>
   ·
-  <a href="https://sonorahq.org/docs">Docs</a>
+  <a href="#new-features--enhancements">New Features</a>
   ·
-  <a href="https://sonorahq.org/docs/roadmap">Roadmap</a>
+  <a href="#core-features">Core Features</a>
   ·
-  <a href="https://sonorahq.org/faq">FAQ</a>
+  <a href="#building--installation">Building</a>
+  ·
+  <a href="#licensing--legal">License</a>
 </p>
 
-[![Build](https://img.shields.io/github/actions/workflow/status/sonorahq/sonora/release.yml?style=flat-square&label=build)](https://github.com/sonorahq/sonora/actions/workflows/release.yml)
-[![License](https://img.shields.io/github/license/sonorahq/sonora?style=flat-square&label=license)](./COPYING)
-![Installs](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fsonora-stats.nolight.dev%2Fcount&query=%24.count&label=Installs&color=blue&style=flat-square)
-\
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/a8N8Tx23rV)
-[![Matrix](https://img.shields.io/badge/Matrix-000000?style=for-the-badge&logo=matrix&logoColor=white)](https://matrix.to/#/#sonora:nolight.dev)
-
-### A native music streaming client, built with Rust and GPUI
-
-Stream from your favorite services and play local files — all in one **native** app.
 </div>
 
-<div align="center">
-    <table>
-      <tr>
-        <td colspan="2">
-          <img width="1613" height="981" alt="image" src="https://github.com/user-attachments/assets/7952a912-7fbc-4186-b467-a08dd7e71e22" />
-        </td>
-      </tr>
-      <tr>
-        <td width="50%">
-          <img width="1623" height="987" alt="image" src="https://github.com/user-attachments/assets/580bf9d6-db85-4fde-b599-82ba2a28cc51" />
-        </td>
-        <td width="50%">
-          <img width="1623" height="987" alt="image" src="https://github.com/user-attachments/assets/64fcd709-5917-432c-a418-2e07527343d2" />
-        </td>
-      </tr>
-    </table>
-</div>
-<div align="center">
-    <sub>
-      Adaptive themes are optional. Everything is (or will be) customizable.
-    </sub>
-</div>
+---
+
+## About The Fork
+
+**Poly Windows** is an open-source derivative fork of **[Sonora](https://github.com/sonorahq/sonora)**, created by the Poly Project.
+
+While upstream Sonora provides a blazing-fast, native music streaming foundation built in Rust and [GPUI](https://github.com/zed-industries/zed), **Poly Windows** elevates the desktop listening experience with:
+- **Apple-grade Automix and Multiband Crossfading** with dual-deck real-time DSP filter sweeps and vocal morphing.
+- **Acrylic glassmorphic aesthetics** and floating, scroll-following window controls.
+- **A completely redesigned Curated Home screen** with personalized shelves and trending tracks.
+- **High-resolution cover artwork decoding** across streaming providers.
+- **Enhanced lyrics synchronization hierarchy** with smooth pop-in and pop-out animations.
+- **AMLL-inspired Ambient Fullscreen mode** with low-overhead dynamic color blending.
+
+All original upstream copyright notices and credits belong to the [Sonora Contributors](https://sonorahq.org). This fork is fully open-source and distributed under the **GNU General Public License version 3.0 (GPL-3.0-or-later)**. For full details on modifications and GPL compliance, see [`NOTICE.md`](./NOTICE.md).
+
+---
 
 > [!IMPORTANT]
-> **Sonora is not a piracy tool.**
+> **Poly Windows is not a piracy tool.**
 >
-> Sonora is not a platform for obtaining or sharing copyrighted material. We will not implement any functions that can be used to export decrypted streams, DRM licenses, content keys, or to convert protected streams into media files.
+> Like upstream Sonora, Poly Windows is not a platform for obtaining, ripping, or distributing copyrighted material. We will not implement functions that export decrypted streams, DRM licenses, content keys, or convert protected streams into media files.
 >
-> Sonora is not designed to circumvent subscriptions or other restrictions put in place by music streaming platforms. If the service demands that you have a valid subscription in order to play back their tracks, so will Sonora.
->
-> Features aimed at ripping, downloading, distributing, or gaining access to protected streaming content are out of scope for the project.
+> Poly Windows requires valid user authentication and subscriptions for each connected streaming provider (Spotify, Apple Music, Subsonic, etc.). Protected content is streamed directly through official provider mechanisms.
 
-## Features
+---
 
-- **Apple Music, Spotify, YouTube Music, Deezer, Subsonic/Navidrome** and local playback
-- Gapless playback, audio normalization, shuffle, sleep timer
-- Synced/karaoke lyrics, background vocals, and romanization
-- Scrobbling with LastFM, ListenBrainz, LibreFM, and Maloja
-- Themes, fonts, icons, transparency, blur, and window styling
-- Discord Rich Presence, native file opening
-- macOS, Windows, Linux, and (probably) FreeBSD support
+## New Features & Enhancements
 
-## Installation
+### 1. Studio-Grade Automix & Multiband Crossfade Engine
+- **Dual-Deck Overlapping Audio Architecture**: Overlaps incoming and outgoing tracks without audio gaps or clicks.
+- **Dynamic Biquad Filter Sweeps**: Frequency-swept high-pass filters (420Hz ↔ 20Hz) ensure seamless low-end bass transitions between tracks.
+- **Vocal-Morphing Gain Curves**: Preserves vocals during song handoffs rather than abruptly fading the entire mix.
+- **Flexible Modes**: Choose between **AutoMix** (intelligent track-length analysis), **Auto Crossfade**, or **Manual Crossfade** (1s to 12s duration). Configurable under *Settings → Playback*.
 
-### macOS
+### 2. Curated Home Screen & Poly Design System
+- **Curated Music Shelves**: Personalized recommendations, trending releases, and curated music sections (`crates/views/src/screens/home/curated.rs`).
+- **Acrylic Frosted Glass Player Bar**: Translucent glassmorphism with subtle gradient fades, border-smoothing, and responsive layout.
+- **Floating Windows Controls**: Minimalist, rounded window buttons (minimize, maximize, close) floating at the top-right that smoothly follow user scrolling.
+- **Custom Poly Iconography**: Native Lucide vector icons for recommendations, charts, trending tracks, and playback indicators.
 
-Install with [Brew](https://brew.sh/):
+### 3. Full-Resolution Artwork Pipeline
+- Replaced low-resolution thumbnails with uncompressed, maximum-resolution artwork fetchers for Spotify, Apple Music, and local libraries.
 
+### 4. Advanced Lyrics Provider Hierarchy & Fluid Motion
+- **Intelligent Lyrics Ranking**: Automatically selects the highest-granularity lyrics source:
+  1. Word-by-word synced (Apple TTML)
+  2. Sentence-by-sentence synced (LRC / Spotify)
+  3. Plain unsynced text
+- **Fluid Pop-In / Pop-Out Drawer**: Smooth animated opening and closing transitions for lyrics with zero harsh page layout stutter.
+
+### 5. AMLL-Inspired Ambient Fullscreen Display
+- Dynamic, GPU-efficient ambient backdrop that extracts color palettes from active album artwork and animates floating neon color spheres.
+
+### 6. Looping & Infinite Smart Playback
+- Flexible repeat states: Single Track Repeat, Playlist Repeat, and infinite autoplay continuation styled after your current music session.
+
+### 7. Accelerated Windows Development Workflow
+- Includes `build-fast.bat` with optimized MSVC/mold flags and incremental cache configurations for rapid iteration.
+
+---
+
+## Core Features (Inherited from Sonora)
+
+- **Streaming Providers**: Spotify (via librespot), Apple Music, YouTube Music, Deezer, Subsonic/Navidrome, and Local Files.
+- **Native GPUI Engine**: Zed's GPU-accelerated UI framework delivering 120fps+ smooth rendering with minimal CPU overhead.
+- **Audio Pipeline**: Gapless playback, EBU R128 loudness normalization, and custom equalizer with preset memory.
+- **Rich Presence & Integrations**: Discord Rich Presence, Last.fm, ListenBrainz, LibreFM, and Maloja scrobbling.
+- **Localization**: Fluent i18n localization support.
+
+---
+
+## Building & Installation
+
+### Prerequisites (Windows)
+- **Rust Toolchain**: Rust 1.84+ (edition 2024 support, MSVC toolchain recommended)
+- **C++ Build Tools**: Visual Studio C++ Build Tools (required for Widevine / native components)
+- **Git**
+
+### Rapid Build (Windows)
+To build with optimizations and fast linking:
+```cmd
+build-fast.bat
+```
+
+### Standard Cargo Build
 ```sh
-brew install --cask nolight132/tap/sonora
+# Check workspace
+cargo check --workspace
+
+# Run debug build
+cargo run --package sonora
+
+# Build release binary
+cargo build --release --package sonora
 ```
+The compiled executable will be located at `target/release/sonora.exe`.
 
-After installing (thanks Apple):
-
+### Linux / macOS
 ```sh
-xattr -dr com.apple.quarantine /Applications/Sonora.app
+# Nix environment (optional)
+nix develop
+
+# Standard cargo run
+cargo run --locked --package sonora
 ```
 
-### Linux
+---
 
-#### Arch
+## Project Structure
 
-Install from the AUR with your AUR helper of choice:
-
-```sh
-yay -S sonora-bin
+```
+crates/
+  sonora/       Binary entrypoint, window initialization, single-instance coordination
+  views/        GPUI view screens, shells (Workspace, Fullscreen), and app chrome
+  state/        Reactive app state, playback orchestration, and async tasks
+  music/        Audio engine, DSP transition engine, providers, and models
+  storage/      SQLite database for cache and persistent state
+  ui/           Poly design system tokens, typography, glassmorphism, and widgets
+  router/       Destination router and navigation history
+  input/        Input handlers and global keyboard shortcuts
+  i18n/         Fluent localization and translations
+  icons/        Icon asset registry and SVG loaders
+  embed/        Build-script helper for static asset bundling
+  webview/      Native browser wrapper for authentication flows
+  widevine/     Widevine CDM client host
 ```
 
-`sonora-bin` installs the prebuilt release binary. `sonora` builds the same version from source
-instead, which takes a while on a Rust and GPUI tree but links against your own system libraries:
+---
 
-```sh
-yay -S sonora
-```
+## Licensing & Legal
 
-Either `pipewire-alsa` or `pulseaudio-alsa` is required, matching your sound server. Sonora
-warns you at startup when the one your sound server needs is missing.
+Poly Windows is free software released under the **GNU General Public License version 3.0 (GPL-3.0-or-later)**.
 
-#### Flatpak
-
-Add the Sonora repository (updates with `flatpak update`):
-
-```sh
-flatpak install --user https://sonorahq.github.io/sonora/sonora.flatpakref
-```
-
-#### AppImage
-
-Download the `x86_64` AppImage from the
-[latest release](https://github.com/sonorahq/sonora/releases/latest), make it executable and run
-it:
-
-```sh
-chmod +x sonora-*.AppImage
-./sonora-*.AppImage
-```
-
-An `aarch64` build is published beside it. The AppImage carries no Vulkan driver and no ALSA
-bridge, so both still come from your system. It does not update itself, but it carries its update
-information, so [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate) or an
-AppImage manager such as [AppManager](https://github.com/kem-a/AppManager) can fetch a new release
-for you.
-
-### Nix
-
-The flake packages the latest tagged release binary or builds from source if unavailable for your platform.
-
-```nix
-inputs.sonora.url = "github:sonorahq/sonora";
-```
-
-```text
-inputs.sonora.packages.${system}.default
-inputs.sonora.packages.${system}.sonora (build from source)
-inputs.sonora.packages.${system}.sonora-bin (prebuilt, if available)
-```
-
-You can set configuration options via the included Home Manager module under `programs.sonora`:
-
-```nix
-{
-  imports = [ inputs.sonora.homeManagerModules.default ];
-  programs.sonora = {
-    enable = true;
-    settings = {
-      provider = "youtube";
-      appearance.theme = "dark";
-    };
-  };
-}
-```
-
-### Windows
-
-#### Installer
-
-Download and run the [installer](https://github.com/sonorahq/sonora/releases/latest/download/Sonora-Setup.exe),
-or the [ARM installer](https://github.com/sonorahq/sonora/releases/latest/download/Sonora-Setup-arm64.exe)
-on Windows on ARM.
-
-#### Portable
-
-Download the latest `windows-msvc.exe` for your architecture from [Releases](https://github.com/sonorahq/sonora/releases/latest).
-
-## Community
-
-Feel free to join our [Discord](https://discord.gg/a8N8Tx23rV) server and [Matrix](https://matrix.to/#/#sonora:nolight.dev) space.
-Discord is the primary one, but we do have a Matrix bridge.
-
-## AI policy
-
-We have nothing against the usage of LLMs in the project — in fact, we use them ourselves.
-We believe that AI can speed up development in a lot of meaningful ways and be a useful
-tool for learning new concepts. We have also found it particularly helpful for
-contributing to substantial codebases such as GPUI and librespot, where it has helped
-us quickly locate the relevant parts of the code.
-
-**However**, using AI cannot act as an excuse for failing to
-understand, review, and test the changes proposed. Furthermore, we expect communication
-with a real person, not a computer. This includes but is not limited to PR/issue text
-generation, comments in discussions, etc. A short summary of minor changes can be
-generated and does not need to be disclosed explicitly, but the reasoning and motivation
-behind a change must come from the contributor and reflect their own understanding.
-
-Note that PRs that fail to adhere to these requirements may be rejected without further notice.
-
-AI-assisted proofreading and translation of human-written text are permitted.
-
-## Translations
-
-<!-- i18n:start -->
-
-| Language | Translated | Coverage |
-| --- | --- | --- |
-| English (`en-US`) | 755/755 | 100% |
-| Deutsch (`de`) | 628/755 | 83% |
-| Español (`es`) | 690/755 | 91% |
-| Français (`fr`) | 749/755 | 99% |
-| Italiano (`it`) | 605/755 | 80% |
-| Bahasa Indonesia (`id`) | 605/755 | 80% |
-| 日本語 (`ja`) | 605/755 | 80% |
-| Русский (`ru`) | 711/755 | 94% |
-| Українська (`uk`) | 711/755 | 94% |
-| Polski (`pl`) | 711/755 | 94% |
-| Čeština (`cs`) | 743/755 | 98% |
-| Português (Brasil) (`pt-BR`) | 605/755 | 80% |
-| 简体中文 (`zh-CN`) | 605/755 | 80% |
-| Türkçe (`tr`) | 605/755 | 80% |
-| Shqip (`sq`) | 714/755 | 95% |
-
-<!-- i18n:end -->
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=sonorahq%2Fsonora&type=date&logscale=&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=sonorahq/sonora&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=sonorahq/sonora&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=sonorahq/sonora&type=date&legend=top-left" />
- </picture>
-</a>
-
-## Credits
-
-Sonora is built with the help of some incredible open-source projects, including:
-
-- [Zed](https://github.com/zed-industries/zed) — a wonderful editor (~~ab~~)used by all core team members. Conveniently provides `gpui` — their native Rust rendering stack.
-- [librespot](https://github.com/librespot-org/librespot) — Spotify playback and library integration.
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — certain YouTube ideas implemented in [ytmusic-rs](https://github.com/sonorahq/ytmusic-rs) :)
-
-## Code signing
-
-Sonora has applied for code signing through SignPath Foundation. Current releases are not yet signed through SignPath Foundation. If approved, signed releases will use free code signing provided by SignPath.io, with a certificate by SignPath Foundation.
-
-## License
-
-Copyright (C) 2026 Sonora Contributors.
-
-Sonora is free software, released under the [GNU General Public License version
-3 or later](COPYING).
-
-Sonora is an unofficial client and is not affiliated with, endorsed by, or
-sponsored by Spotify AB.
-
-The binary also embeds the [Inter](https://github.com/rsms/inter) typeface (SIL
-Open Font License 1.1) and four interchangeable icon sets:
-[Lucide](https://lucide.dev) (ISC), [Iconoir](https://iconoir.com) (MIT),
-[Remix Icon](https://remixicon.com) 4.8.0 (Apache 2.0) and the
-[Solar](https://www.figma.com/community/file/1166831539721848736) Linear set
-(CC BY 4.0, by 480 Design). Each pack keeps its licence beside its files in
-`assets/icons`. `THIRD-PARTY.md` lists every bundled dependency.
+- **Upstream Project:** Sonora (<https://github.com/sonorahq/sonora>), Copyright (C) Sonora Contributors.
+- **Fork Project:** Poly Windows (<https://github.com/itzrealx2sad/Poly>), Modifications Copyright (C) 2026 Poly Project Contributors.
+- **License Terms:** See the [`COPYING`](./COPYING) and [`LICENSE`](./LICENSE) files for the full GNU General Public License v3.0 text.
+- **Modification Notice:** See [`NOTICE.md`](./NOTICE.md) for detailed attribution and the itemized ledger of modifications in accordance with GPL-3.0 Section 5.

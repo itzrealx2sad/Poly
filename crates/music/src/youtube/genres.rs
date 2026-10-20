@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -25,7 +29,6 @@ const QUICK_PICKS_LIMIT: usize = 15;
 const PAGES: usize = 8;
 const CATEGORIES: &str = "FEmusic_moods_and_genres";
 const CATEGORY: &str = "FEmusic_moods_and_genres_category";
-const THUMB: u32 = 120;
 const ARTIST_PAGE: &str = "MUSIC_PAGE_TYPE_ARTIST";
 const SEPARATOR: &str = " • ";
 
@@ -390,7 +393,7 @@ fn artist(node: &Value) -> Option<SavedArtist> {
 fn thumb(thumbnails: &[ytmusic::Thumbnail]) -> Option<String> {
     thumbnails
         .iter()
-        .find(|thumb| thumb.width >= THUMB)
+        .max_by_key(|thumb| thumb.width)
         .or_else(|| thumbnails.last())
         .map(|thumb| thumb.url.clone())
 }

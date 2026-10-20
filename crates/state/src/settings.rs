@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 //! User preferences and runtime state
 //!
 //! Preferences a user sets on purpose go in `settings.json` as [`Values`]. Everything the app
@@ -268,17 +272,32 @@ struct Held {
     pin: Pin,
 }
 
-/// Everything `settings.json` holds. Preferences a user sets on purpose, safe to edit by hand.
-/// Missing keys take their defaults, unknown keys are ignored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CrossfadeMode {
+    Auto,
+    Manual,
+}
+
+impl Default for CrossfadeMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 struct Values {
     normalisation: bool,
     gapless: bool,
+    automix: bool,
+    crossfade: bool,
+    crossfade_mode: CrossfadeMode,
+    crossfade_duration: u32,
     equalizer: bool,
     /// Per band gains in decibels, lowest band first. Kept even while `equalizer` is off, so
     /// turning it back on restores the curve.
     equalizer_bands: Vec<f32>,
+    equalizer_custom_bands: Vec<f32>,
     sleep_timer: bool,
     discord_presence: bool,
     discord_name: DiscordName,
@@ -433,8 +452,13 @@ impl Default for Values {
         Self {
             normalisation: false,
             gapless: true,
+            automix: false,
+            crossfade: false,
+            crossfade_mode: CrossfadeMode::Auto,
+            crossfade_duration: 5,
             equalizer: false,
             equalizer_bands: vec![0.; equalizer::BANDS],
+            equalizer_custom_bands: vec![0.; equalizer::BANDS],
             sleep_timer: false,
             discord_presence: false,
             discord_name: DiscordName::Sonora,
@@ -755,6 +779,22 @@ impl AppSettings {
         self.values.gapless
     }
 
+    pub fn automix(&self) -> bool {
+        self.values.automix
+    }
+
+    pub fn crossfade(&self) -> bool {
+        self.values.crossfade
+    }
+
+    pub fn crossfade_mode(&self) -> CrossfadeMode {
+        self.values.crossfade_mode
+    }
+
+    pub fn crossfade_duration(&self) -> u32 {
+        self.values.crossfade_duration.clamp(1, 12)
+    }
+
     pub fn equalizer(&self) -> bool {
         self.values.equalizer
     }
@@ -763,6 +803,15 @@ impl AppSettings {
     /// written by another version still loads.
     pub fn equalizer_gains(&self) -> Gains {
         let stored = &self.values.equalizer_bands;
+        let gains = std::array::from_fn(|band| stored.get(band).copied().unwrap_or(0.));
+        equalizer::clamped(&gains)
+    }
+
+    pub fn equalizer_custom_gains(&self) -> Gains {
+        let stored = match self.values.equalizer_custom_bands.is_empty() {
+            true => &self.values.equalizer_bands,
+            false => &self.values.equalizer_custom_bands,
+        };
         let gains = std::array::from_fn(|band| stored.get(band).copied().unwrap_or(0.));
         equalizer::clamped(&gains)
     }
@@ -1052,6 +1101,7 @@ impl AppSettings {
             blur_window: self.blur_window(),
             tint: None,
             tint_secondary: None,
+            pitch_black: false,
         }
     }
 
@@ -1151,6 +1201,26 @@ impl AppSettings {
         self.schedule_save(cx);
     }
 
+    pub fn set_automix(&mut self, automix: bool, cx: &mut Context<Self>) {
+        self.values.automix = automix;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_crossfade(&mut self, crossfade: bool, cx: &mut Context<Self>) {
+        self.values.crossfade = crossfade;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_crossfade_mode(&mut self, mode: CrossfadeMode, cx: &mut Context<Self>) {
+        self.values.crossfade_mode = mode;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_crossfade_duration(&mut self, duration: u32, cx: &mut Context<Self>) {
+        self.values.crossfade_duration = duration.clamp(1, 12);
+        self.schedule_save(cx);
+    }
+
     pub fn set_equalizer(&mut self, on: bool, cx: &mut Context<Self>) {
         self.values.equalizer = on;
         self.schedule_save(cx);
@@ -1158,6 +1228,11 @@ impl AppSettings {
 
     pub fn set_equalizer_gains(&mut self, gains: &Gains, cx: &mut Context<Self>) {
         self.values.equalizer_bands = equalizer::clamped(gains).to_vec();
+        self.schedule_save(cx);
+    }
+
+    pub fn set_equalizer_custom_gains(&mut self, gains: &Gains, cx: &mut Context<Self>) {
+        self.values.equalizer_custom_bands = equalizer::clamped(gains).to_vec();
         self.schedule_save(cx);
     }
 

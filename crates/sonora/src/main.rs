@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod actions;
@@ -126,7 +130,10 @@ fn main() {
         ];
         state::init(cx, io, database, providers, local_provider, lyrics);
         #[cfg(target_os = "windows")]
-        state::install_rounded_window_hook(set_corner_preference, cx);
+        {
+            state::install_rounded_window_hook(set_corner_preference, cx);
+            state::install_backdrop_window_hook(set_backdrop_preference, cx);
+        }
         #[cfg(target_os = "macos")]
         state::install_rounded_window_hook(set_toolbar_style, cx);
         let opened_a_destination = opened_start.is_some();
@@ -351,7 +358,7 @@ fn open_window(cx: &mut App) {
             display_id,
             window_background: background,
             titlebar: Some(TitlebarOptions {
-                title: Some("Sonora".into()),
+                title: Some("Poly".into()),
                 appears_transparent: true,
                 traffic_light_position: Some(traffic_lights),
             }),
@@ -359,7 +366,7 @@ fn open_window(cx: &mut App) {
             is_movable: true,
             is_resizable: true,
             app_owns_titlebar_drag: true,
-            app_id: Some("sonora".into()),
+            app_id: Some("poly".into()),
             window_min_size: Some(LEAST_SIZE),
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             window_decorations: Some(decorations),
@@ -368,10 +375,14 @@ fn open_window(cx: &mut App) {
         |window, cx| {
             window.set_rem_size(cx.theme().font_size);
             #[cfg(target_os = "windows")]
-            set_corner_preference(
-                window,
-                Sonora::global(cx).settings.read(cx).window_rounding(),
-            );
+            {
+                set_corner_preference(
+                    window,
+                    Sonora::global(cx).settings.read(cx).window_rounding(),
+                );
+                let look = Sonora::global(cx).settings.read(cx).look();
+                set_backdrop_preference(window, look.blur_window, look.transparent);
+            }
             let handle = platform_handle(window);
             state::attach_remote(handle, cx);
             #[cfg(windows)]
@@ -413,6 +424,62 @@ fn set_corner_preference(window: &gpui::Window, rounding: ui::Rounding) {
             DWMWA_WINDOW_CORNER_PREFERENCE as u32,
             &preference as *const _ as *const std::ffi::c_void,
             size_of_val(&preference) as u32,
+        );
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn set_backdrop_preference(window: &gpui::Window, blur_window: bool, transparent: bool) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+
+    const DWMWA_SYSTEMBACKDROP_TYPE: u32 = 38;
+
+    let Ok(RawWindowHandle::Win32(handle)) =
+        HasWindowHandle::window_handle(window).map(|handle| handle.as_raw())
+    else {
+        return;
+    };
+    let handle = handle.hwnd.get() as *mut std::ffi::c_void;
+    let backdrop: u32 = match blur_window && transparent {
+        true => 3,
+        false => 1,
+    };
+    #[repr(C)]
+    struct Margins {
+        cx_left: i32,
+        cx_right: i32,
+        cy_top: i32,
+        cy_bottom: i32,
+    }
+    #[link(name = "dwmapi")]
+    unsafe extern "system" {
+        fn DwmExtendFrameIntoClientArea(
+            hwnd: *mut std::ffi::c_void,
+            pmarinset: *const Margins,
+        ) -> i32;
+    }
+    let margins = match blur_window && transparent {
+        true => Margins {
+            cx_left: -1,
+            cx_right: -1,
+            cy_top: -1,
+            cy_bottom: -1,
+        },
+        false => Margins {
+            cx_left: 0,
+            cx_right: 0,
+            cy_top: 0,
+            cy_bottom: 0,
+        },
+    };
+    unsafe {
+        DwmExtendFrameIntoClientArea(handle, &margins);
+        DwmSetWindowAttribute(
+            handle,
+            DWMWA_SYSTEMBACKDROP_TYPE,
+            &backdrop as *const _ as *const std::ffi::c_void,
+            size_of_val(&backdrop) as u32,
         );
     }
 }

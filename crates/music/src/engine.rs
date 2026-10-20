@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 //! One playback engine, for every provider whose tracks are a file to decode.
 //!
 //! Two threads share the work the way the Spotify path does: a tokio thread fetches, and one
@@ -28,7 +32,8 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use crate::audio::{Chain, Volume};
 use crate::sink::{Cue, Paced, packet, watch_for_output};
 use crate::spectrum::Spectrum;
-use crate::{PlaybackConfig, PlaybackEvent, PlaybackEvents, Player};
+use crate::transition::{DualStreamMixer, EnvelopeFollower, SilenceTrimmer, StreamResampler};
+use crate::{PlaybackConfig, PlaybackEvent, PlaybackEvents, Player, TransitionConfig};
 
 /// How many frames the decoder hands over at a time. Small enough that a skip is heard at once,
 /// large enough that the queue is not rebuilt for every few samples.
@@ -156,6 +161,8 @@ enum Command {
     Pause,
     Seek(Duration),
     Gain(f32),
+    Transition(TransitionConfig),
+    StartOutro(Duration),
 }
 
 /// What the audio thread is told to do. Everything that touches the network has happened by the
@@ -181,6 +188,8 @@ enum Job<F: Fetch> {
     /// Move within the track being decoded. The bytes are already arriving, so this is local.
     Seek(Duration),
     Gain(f32),
+    Transition(TransitionConfig),
+    StartOutro(Duration),
 }
 
 struct Handle {
@@ -234,6 +243,15 @@ impl Player for Handle {
 
     fn set_gain(&self, gain: f32) {
         self.commands.send(Command::Gain(gain)).ok();
+    }
+
+    fn set_transition(&self, transition: TransitionConfig) {
+        self.commands.send(Command::Transition(transition)).ok();
+    }
+
+    fn start_outro(&self, remaining: Duration) -> bool {
+        self.commands.send(Command::StartOutro(remaining)).ok();
+        false
     }
 
     fn spectrum(&self) -> Option<Spectrum> {
@@ -414,8 +432,9 @@ async fn engine_loop<F: Fetch>(
                         });
 
                         let held = ahead
-                            .take_if(|(cached, _)| *cached == id)
-                            .map(|(_, loaded)| loaded);
+                            .as_ref()
+                            .filter(|(cached, _)| *cached == id)
+                            .map(|(_, loaded)| loaded.clone());
                         match held {
                             // Fetched already, so this starts on the next read.
                             Some(loaded) => {
@@ -437,7 +456,7 @@ async fn engine_loop<F: Fetch>(
                         }
                     }
                     Command::Preload { id, segue } => {
-                        if current.is_none() || current.as_deref() == Some(id.as_str()) {
+                        if current.is_none() || (current.as_deref() == Some(id.as_str()) && !segue) {
                             continue;
                         }
                         let held = ahead
@@ -495,6 +514,12 @@ async fn engine_loop<F: Fetch>(
                     Command::Gain(level) => {
                         jobs.send(Job::Gain(level)).ok();
                     }
+                    Command::Transition(config) => {
+                        jobs.send(Job::Transition(config)).ok();
+                    }
+                    Command::StartOutro(remaining) => {
+                        jobs.send(Job::StartOutro(remaining)).ok();
+                    }
                 }
             }
             arrival = arrivals.recv() => {
@@ -522,6 +547,7 @@ async fn engine_loop<F: Fetch>(
                 if awaited == Some(at) && current.as_deref() == Some(id.as_str()) {
                     awaited = None;
                     inflight = None;
+                    ahead = Some((id.clone(), loaded.clone()));
                     announce_length(&events, &id, fetch.length(&loaded));
                     watching = Some(watch(&fetch, &id, &loaded, &downloads));
                     jobs.send(Job::Play {
@@ -696,22 +722,24 @@ fn spawn<F: Fetch>(
 /// The track the audio thread is decoding, and where its samples land in real time.
 struct Playing<F: Fetch> {
     id: String,
-    /// Kept so a seek can open a second decoder over the same download.
     loaded: F::Loaded,
     source: F::Source,
     channels: u16,
     rate: u32,
+    source_channels: u16,
+    source_rate: u32,
     base: Duration,
-    /// Samples queued before this track's first one. On a gapless join the one before it is
-    /// still being heard, so its own position only starts once the count passes this.
     offset: u64,
-    /// The track's normalisation gain, applied to every sample as it is decoded. Each track
-    /// carries its own, so a gapless join changes it on the first sample of the next one.
     gain: f32,
+    decoded_samples: u64,
+    total_samples: Option<u64>,
+    prefix: Vec<f32>,
+    prefix_pos: usize,
+    resampler: Option<StreamResampler>,
+    envelope: EnvelopeFollower,
 }
 
 impl<F: Fetch> Playing<F> {
-    /// Opens a decoder for one track, or reports that it cannot be played.
     fn open(
         fetch: &F,
         id: &str,
@@ -722,16 +750,95 @@ impl<F: Fetch> Playing<F> {
     ) -> Option<Self> {
         let source = fetch.open(id, &loaded, at)?;
         let gain = normalisation(normalise, fetch.loudness(&loaded));
+        let channels = source.channels().get();
+        let rate = source.sample_rate().get();
+        let duration = fetch.length(&loaded).or_else(|| source.total_duration());
+        let total_samples = duration.map(|d| (d.as_secs_f64() * rate as f64 * channels as f64) as u64);
+        let decoded_samples = (at.as_secs_f64() * rate as f64 * channels as f64) as u64;
         Some(Self {
             id: id.to_owned(),
-            channels: source.channels().get(),
-            rate: source.sample_rate().get(),
+            channels,
+            rate,
+            source_channels: channels,
+            source_rate: rate,
             loaded,
             source,
             base: at,
             offset,
             gain,
+            decoded_samples,
+            total_samples,
+            prefix: Vec::new(),
+            prefix_pos: 0,
+            resampler: None,
+            envelope: EnvelopeFollower::new(rate),
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn open_matching(
+        fetch: &F,
+        id: &str,
+        loaded: F::Loaded,
+        at: Duration,
+        offset: u64,
+        normalise: bool,
+        target_rate: u32,
+        target_channels: u16,
+        trim_silence: bool,
+    ) -> Option<Self> {
+        let mut playing = Self::open(fetch, id, loaded, at, offset, normalise)?;
+        if trim_silence && at.is_zero() {
+            let (prefix, skipped_samples, skipped_dur) = SilenceTrimmer::trim(
+                &mut playing.source,
+                playing.source_rate,
+                playing.source_channels,
+                playing.gain,
+            );
+            playing.prefix = prefix;
+            playing.decoded_samples = playing.decoded_samples.saturating_add(skipped_samples);
+            playing.base += skipped_dur;
+        }
+        if playing.source_rate != target_rate || playing.source_channels != target_channels {
+            playing.resampler = Some(StreamResampler::new(
+                playing.source_rate,
+                playing.source_channels,
+                target_rate,
+                target_channels,
+            ));
+            playing.rate = target_rate;
+            playing.channels = target_channels;
+            playing.envelope = EnvelopeFollower::new(target_rate);
+        }
+        Some(playing)
+    }
+
+    fn remaining_duration(&self) -> Option<Duration> {
+        let total = self.total_samples?;
+        let buffered = self.prefix.len().saturating_sub(self.prefix_pos) as u64;
+        let consumed = self.decoded_samples.saturating_sub(buffered);
+        let remaining_samples = total.saturating_sub(consumed);
+        let frames = remaining_samples / u64::from(self.source_channels).max(1);
+        Some(Duration::from_secs_f64(frames as f64 / f64::from(self.source_rate).max(1.0)))
+    }
+
+    fn sync_seek(&mut self, position: Duration) {
+        self.base = position;
+        self.offset = 0;
+        self.prefix.clear();
+        self.prefix_pos = 0;
+        self.decoded_samples =
+            (position.as_secs_f64() * self.source_rate as f64 * self.source_channels as f64) as u64;
+        self.envelope.reset();
+    }
+
+    fn apply_outro_hint(&mut self, remaining: Duration) {
+        if self.total_samples.is_none() {
+            let rem_samples = (remaining.as_secs_f64()
+                * self.source_rate as f64
+                * self.source_channels as f64) as u64;
+            self.total_samples = Some(self.decoded_samples.saturating_add(rem_samples));
+        }
     }
 
     fn mark(&self) -> Mark {
@@ -744,24 +851,51 @@ impl<F: Fetch> Playing<F> {
         }
     }
 
-    /// How many samples `frames` frames of this track hold, across every channel.
     fn samples(&self, frames: usize) -> usize {
         frames * usize::from(self.channels).max(1)
     }
 
-    /// Pulls up to `frames` frames out of the decoder into `samples`, which starts empty.
-    /// `None` means the track ended.
-    fn take(&mut self, frames: usize, mut samples: Vec<f32>) -> Option<Vec<f32>> {
-        let wanted = self.samples(frames);
-        for sample in self.source.by_ref().take(wanted) {
-            samples.push(sample * self.gain);
+    fn pull_raw(&mut self, wanted: usize, out: &mut Vec<f32>) {
+        while out.len() < wanted && self.prefix_pos < self.prefix.len() {
+            out.push(self.prefix[self.prefix_pos]);
+            self.prefix_pos += 1;
         }
-        (!samples.is_empty()).then_some(samples)
+        if self.prefix_pos >= self.prefix.len() && !self.prefix.is_empty() {
+            self.prefix.clear();
+            self.prefix_pos = 0;
+        }
+        let rem = wanted.saturating_sub(out.len());
+        if rem > 0 {
+            let before = out.len();
+            for sample in self.source.by_ref().take(rem) {
+                out.push(sample * self.gain);
+            }
+            self.decoded_samples += (out.len() - before) as u64;
+        }
+    }
+
+    fn take(&mut self, frames: usize, mut samples: Vec<f32>) -> Option<Vec<f32>> {
+        samples.clear();
+        if self.resampler.is_some() {
+            let mut resampler = self.resampler.take()?;
+            resampler.produce(frames, &mut samples, |needed, buf| {
+                self.pull_raw(needed, buf);
+            });
+            self.resampler = Some(resampler);
+        } else {
+            let wanted = self.samples(frames);
+            self.pull_raw(wanted, &mut samples);
+        }
+        if samples.is_empty() {
+            None
+        } else {
+            self.envelope
+                .observe_block(&samples, usize::from(self.channels).max(1));
+            Some(samples)
+        }
     }
 }
 
-/// The track being heard, which is not always the one being decoded: at the end of a track the
-/// decoder has moved on, or stopped, while the queue still holds the last seconds of it.
 struct Mark {
     id: String,
     channels: u16,
@@ -771,7 +905,6 @@ struct Mark {
 }
 
 impl Mark {
-    /// Where the sound is: what the output has drawn from this track, from where it started.
     fn at(&self, cue: &Cue) -> Duration {
         let mine = cue.played().saturating_sub(self.offset);
         let frames = mine / u64::from(self.channels).max(1);
@@ -779,9 +912,6 @@ impl Mark {
     }
 }
 
-/// A track whose last sample is queued but not yet heard. The events for the join wait for it,
-/// so one track's end and the next one's start land together, on the sample. The ended track's
-/// download is kept so a seek before then can reopen it.
 struct Join<F: Fetch> {
     ended: String,
     loaded: F::Loaded,
@@ -789,8 +919,13 @@ struct Join<F: Fetch> {
     at: u64,
 }
 
-/// Decodes and writes until told otherwise. Every wait here is on the queue draining or on a
-/// command, never on the network: the bytes are already arriving in the background.
+struct ActiveCrossfade<F: Fetch> {
+    incoming: Playing<F>,
+    mixer: DualStreamMixer,
+    next_info: Option<(String, Option<Duration>)>,
+    scratch: Vec<f32>,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn audio_loop<F: Fetch>(
     fetch: Arc<F>,
@@ -806,8 +941,6 @@ fn audio_loop<F: Fetch>(
     let mut paced = match Paced::open(cue.clone(), chain, changed.clone()) {
         Ok(paced) => paced,
         Err(error) => {
-            // Nothing can be decoded without an output, so this thread is done. The engine is
-            // told once a device is back, and the one that replaces it opens on that.
             log::error!("playback: cannot open audio output: {error:#}");
             return watch_for_output(changed);
         }
@@ -820,16 +953,13 @@ fn audio_loop<F: Fetch>(
     let mut queued: Option<(String, F::Loaded)> = None;
     let mut playing = false;
     let mut reported_at = Instant::now();
+    let mut transition = TransitionConfig::None;
+    let mut crossfading: Option<ActiveCrossfade<F>> = None;
 
     loop {
-        // a track at another rate waits for the last one's tail to play out before the
-        // output reopens under it
         let refitting = current
             .as_ref()
             .is_some_and(|held| !paced.fits(held.rate) && !paced.drained());
-        // anything but decoding means waiting for work rather than spinning: no
-        // track, a paused one, or a full queue. A restored track sits paused
-        // with an empty queue, which the old condition mistook for decoding.
         let idle = current.is_none() || !playing || paced.full() || refitting;
         let job = match idle {
             false => match jobs.try_recv() {
@@ -856,13 +986,14 @@ fn audio_loop<F: Fetch>(
                 .ok();
             events.send(PlaybackEvent::Ended { id: Some(ended) }).ok();
             heard = current.as_ref().map(Playing::mark);
+            let heard_at = heard.as_ref().map_or(Duration::ZERO, |mark| mark.at(&cue));
             match next {
                 Some((id, duration)) => {
                     announce_length(&events, &id, duration);
                     events
                         .send(PlaybackEvent::Playing {
                             id: Some(id),
-                            at: Duration::ZERO,
+                            at: heard_at,
                         })
                         .ok();
                 }
@@ -870,7 +1001,6 @@ fn audio_loop<F: Fetch>(
             }
         }
 
-        // reported from the sound, so it keeps moving while the last seconds play out
         if playing
             && let Some(mark) = &heard
             && reported_at.elapsed() >= interval
@@ -895,6 +1025,7 @@ fn audio_loop<F: Fetch>(
                 } => {
                     queued = None;
                     joining = None;
+                    crossfading = None;
                     written = 0;
                     current = Playing::open(fetch.as_ref(), &id, loaded, at, 0, normalise);
                     if let Some(held) = &current
@@ -910,7 +1041,6 @@ fn audio_loop<F: Fetch>(
                         false => paced.pause(),
                     }
                     match current.is_some() {
-                        // the next write is the new track, so it is the one worth reporting
                         true => cue.arm(),
                         false => {
                             events
@@ -925,6 +1055,7 @@ fn audio_loop<F: Fetch>(
                     queued = None;
                     joining = None;
                     heard = None;
+                    crossfading = None;
                     written = 0;
                     playing = false;
                     paced.pause();
@@ -956,9 +1087,9 @@ fn audio_loop<F: Fetch>(
                     }
                 }
                 Job::Seek(position) if joining.is_some() => {
-                    // The decoder has run past the end of the track still being heard, onto the
-                    // one queued behind it or onto nothing. The seek is in the heard track, so
-                    // that track reopens and the next one goes back in the queue.
+                    if let Some(xf) = crossfading.take() {
+                        queued = Some((xf.incoming.id, xf.incoming.loaded));
+                    }
                     let Some(join) = joining.take() else { continue };
                     if let Some(next) = current.take() {
                         queued = Some((next.id, next.loaded));
@@ -985,11 +1116,11 @@ fn audio_loop<F: Fetch>(
                     cue.arm();
                 }
                 Job::Seek(position) => {
+                    if let Some(xf) = crossfading.take() {
+                        queued = Some((xf.incoming.id, xf.incoming.loaded));
+                    }
                     let Some(held) = &mut current else { continue };
                     match fetch.reopen_to_seek() {
-                        // A second decoder over the same download. Whatever is lined up behind
-                        // this track is still what follows it; only the end it was waiting for
-                        // has moved.
                         true => {
                             let (id, loaded) = (held.id.clone(), held.loaded.clone());
                             match Playing::open(fetch.as_ref(), &id, loaded, position, 0, normalise)
@@ -1005,8 +1136,7 @@ fn audio_loop<F: Fetch>(
                             if let Err(error) = held.source.try_seek(position) {
                                 log::warn!("playback: cannot seek {}: {error}", held.id);
                             }
-                            held.base = position;
-                            held.offset = 0;
+                            held.sync_seek(position);
                         }
                     }
                     joining = None;
@@ -1015,6 +1145,19 @@ fn audio_loop<F: Fetch>(
                     cue.arm();
                 }
                 Job::Gain(level) => paced.set_volume(level),
+                Job::Transition(config) => {
+                    if config == TransitionConfig::None {
+                        if let Some(xf) = crossfading.take() {
+                            queued = Some((xf.incoming.id, xf.incoming.loaded));
+                        }
+                    }
+                    transition = config;
+                }
+                Job::StartOutro(remaining) => {
+                    if let Some(held) = &mut current {
+                        held.apply_outro_hint(remaining);
+                    }
+                }
             }
             continue;
         }
@@ -1027,28 +1170,102 @@ fn audio_loop<F: Fetch>(
             return;
         }
 
+        let track_duration = fetch.length(&held.loaded).or_else(|| {
+            held.total_samples.map(|total| {
+                let frames = total / u64::from(held.source_channels).max(1);
+                Duration::from_secs_f64(frames as f64 / f64::from(held.source_rate).max(1.0))
+            })
+        });
+        let target_duration = transition.duration_for(track_duration);
+        let lookahead = transition.early_fade_lookahead(target_duration);
+
+        if target_duration > Duration::ZERO
+            && crossfading.is_none()
+            && queued.is_some()
+            && held.remaining_duration().is_some_and(|rem| {
+                rem <= target_duration || (rem <= lookahead && held.envelope.is_fading_out())
+            })
+        {
+            let (next_id, next_loaded) = queued.take().unwrap();
+            let incoming = Playing::open_matching(
+                fetch.as_ref(),
+                &next_id,
+                next_loaded.clone(),
+                Duration::ZERO,
+                written,
+                normalise,
+                held.rate,
+                held.channels,
+                true,
+            );
+            if let Some(incoming) = incoming {
+                let effective_duration = held.remaining_duration().map_or(target_duration, |rem| {
+                    rem.min(target_duration).max(Duration::from_millis(1200))
+                });
+                let total_frames = (effective_duration.as_secs_f64() * held.rate as f64) as usize;
+                let next_info = Some((next_id, fetch.length(&next_loaded)));
+                crossfading = Some(ActiveCrossfade {
+                    incoming,
+                    mixer: DualStreamMixer::new(
+                        held.rate,
+                        held.channels,
+                        total_frames.max(1),
+                        matches!(transition, TransitionConfig::AutoMix),
+                    ),
+                    next_info,
+                    scratch: Vec::with_capacity(held.samples(CHUNK)),
+                });
+            }
+        }
+
         let buffer = paced.buffer(held.samples(CHUNK));
-        let Some(samples) = held.take(CHUNK, buffer) else {
-            // the decoder is done, but its last samples are still queued
+        let Some(mut samples) = held.take(CHUNK, buffer) else {
+            if let Some(ActiveCrossfade {
+                incoming,
+                next_info,
+                ..
+            }) = crossfading.take()
+            {
+                let ended = held.id.clone();
+                let loaded = held.loaded.clone();
+                let handoff_at = incoming
+                    .offset
+                    .saturating_add(written.saturating_sub(incoming.offset) / 2);
+                *held = incoming;
+                joining = Some(Join {
+                    ended,
+                    loaded,
+                    next: next_info,
+                    at: handoff_at,
+                });
+                continue;
+            }
             let Some(Playing {
-                id: ended, loaded, ..
+                id: ended,
+                loaded,
+                rate: prev_rate,
+                channels: prev_channels,
+                ..
             }) = current.take()
             else {
                 continue;
             };
+            let trim_gapless = transition.is_enabled();
             let next = queued.take().and_then(|(id, loaded)| {
                 let duration = fetch.length(&loaded);
-                current = Playing::open(
+                current = Playing::open_matching(
                     fetch.as_ref(),
                     &id,
                     loaded,
                     Duration::ZERO,
                     written,
                     normalise,
+                    prev_rate,
+                    prev_channels,
+                    trim_gapless,
                 );
                 current.as_ref().map(|_| (id, duration))
             });
-            // both events wait for the queue to reach here, so the join lands on the sample
             joining = Some(Join {
                 ended,
                 loaded,
@@ -1057,6 +1274,42 @@ fn audio_loop<F: Fetch>(
             });
             continue;
         };
+
+        let mut finish_crossfade = false;
+        if let Some(xf) = &mut crossfading {
+            let frames = samples.len() / usize::from(held.channels).max(1);
+            let mut scratch = std::mem::take(&mut xf.scratch);
+            let in_samples = xf.incoming.take(frames, scratch);
+            if let Some(in_samples) = in_samples {
+                finish_crossfade = xf.mixer.mix_block(&mut samples, &in_samples);
+                xf.scratch = in_samples;
+            } else {
+                finish_crossfade = true;
+            }
+        }
+
+        if finish_crossfade {
+            if let Some(ActiveCrossfade {
+                incoming,
+                next_info,
+                ..
+            }) = crossfading.take()
+            {
+                let ended = held.id.clone();
+                let loaded = held.loaded.clone();
+                let end_sample = written + samples.len() as u64;
+                let handoff_at = incoming
+                    .offset
+                    .saturating_add(end_sample.saturating_sub(incoming.offset) / 2);
+                *held = incoming;
+                joining = Some(Join {
+                    ended,
+                    loaded,
+                    next: next_info,
+                    at: handoff_at,
+                });
+            }
+        }
 
         let count = samples.len() as u64;
         let Some(chunk) = packet(samples, held.channels, held.rate) else {

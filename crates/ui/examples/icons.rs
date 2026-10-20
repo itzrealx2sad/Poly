@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use std::borrow::Cow;
 
 use gpui::prelude::*;
@@ -143,6 +147,7 @@ fn main() {
                     blur_window: false,
                     tint: None,
                     tint_secondary: None,
+                    pitch_black: false,
                 },
                 &Default::default(),
                 cx,

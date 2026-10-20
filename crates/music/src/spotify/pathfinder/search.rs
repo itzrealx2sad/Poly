@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Portions Copyright (C) Sonora Contributors
+// Modifications Copyright (C) 2026 Poly Project Contributors
+
 use anyhow::{Context as _, Result};
 use librespot_core::Session;
 use serde::Deserialize;
@@ -11,7 +15,6 @@ const PLAYLISTS: &str = "searchPlaylists";
 const ALBUM_PREFIX: &str = "spotify:album:";
 const ARTIST_PREFIX: &str = "spotify:artist:";
 const PLAYLIST_PREFIX: &str = "spotify:playlist:";
-const HEADER: u32 = 300;
 const LIMIT: u32 = 20;
 
 #[derive(Deserialize)]
@@ -262,15 +265,8 @@ fn artists(artists: Artists) -> (String, Vec<ArtistRef>) {
     (names, refs)
 }
 
-fn cover(sources: &[Image], large: bool) -> Option<String> {
-    let source = match large {
-        true => sources
-            .iter()
-            .filter(|source| height(source) >= HEADER)
-            .min_by_key(height)
-            .or_else(|| sources.iter().max_by_key(height)),
-        false => sources.iter().min_by_key(height),
-    }?;
+fn cover(sources: &[Image], _large: bool) -> Option<String> {
+    let source = sources.iter().max_by_key(height)?;
     (!source.url.is_empty()).then(|| source.url.clone())
 }
 

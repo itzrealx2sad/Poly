@@ -377,6 +377,13 @@ release-meta = { $year } • { $kind }
 # home page
 home-quick-picks = Quick picks
 home-quick-picks-empty = Like a few songs and they will show up here
+home-recommendations = Today's Recommendations
+home-live-picks = Live Picks
+home-listening-now = Listening right now
+home-most-listened = Most listened of all time
+home-fresh-releases = Fresh Releases & Singles
+home-top-charts = Top Charts - Global
+home-late-night = Late Night & Chill
 home-recently-added = Recently added
 home-playlists = Playlists
 home-favorite-albums = Favorite albums
@@ -596,6 +603,16 @@ settings-normalisation = Normalize loudness
 settings-normalisation-detail = Keeps tracks at a consistent volume
 settings-gapless = Gapless playback
 settings-gapless-detail = Runs one track into the next without a pause, the way an album was sequenced
+settings-automix = AutoMix
+settings-automix-detail = Seamless beat-synced, phrase-aligned DJ transitions between tracks
+settings-crossfade = Crossfade songs
+settings-crossfade-detail = Smoothly fade between consecutive tracks
+settings-crossfade-mode = Crossfade mode
+settings-crossfade-mode-detail = Automatically match energy and outro or set a fixed duration
+settings-crossfade-mode-auto = Automatic
+settings-crossfade-mode-manual = Manual
+settings-crossfade-duration = Crossfade duration
+settings-crossfade-duration-detail = Length of transition between songs
 settings-sleep = Sleep timer
 settings-sleep-detail = Lets the music stop on its own after a set time, so it can play you to sleep
 settings-stay-awake = Stay awake during playback
@@ -906,3 +923,5 @@ toast-tray-unavailable = There is no system tray to put the icon in
 
 # power
 wake-reason = Music is playing
+
+menu-more = More options
