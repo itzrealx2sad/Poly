@@ -10,12 +10,14 @@
 #define SetupName GetEnv("SONORA_SETUP")
 
 [Setup]
-AppId={{8D65C17E-79E8-46D7-9A37-42E85E73F738}
+AppId={{E2626299-2DCD-4338-92CE-F22396EFE7CD}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
+UsePreviousAppDir=no
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExeName}
 OutputDir={#OutputDir}
@@ -38,6 +40,11 @@ Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#AppExeName}"; Flags: igno
 Source: "..\..\COPYING"; DestDir: "{app}"; DestName: "LICENSE"; Flags: ignoreversion
 Source: "..\..\THIRD-PARTY.md"; DestDir: "{app}"; Flags: ignoreversion
 
+[InstallDelete]
+Type: filesandordirs; Name: "{localappdata}\Programs\Sonora"
+Type: files; Name: "{autodesktop}\Sonora.lnk"
+Type: filesandordirs; Name: "{autoprograms}\Sonora"
+
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon; Check: not SilentUpgrade
@@ -47,6 +54,11 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 ; MultiSelectModel=Player is the key Explorer honors to invoke the app once
 ; with every selected file passed as its own argument, instead of once per file.
 [Registry]
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Uninstall\{{8D65C17E-79E8-46D7-9A37-42E85E73F738}_is1"; Flags: dontcreatekey uninsdeletekey
+Root: HKA; Subkey: "Software\Sonora"; Flags: dontcreatekey uninsdeletekey
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: none; ValueName: "Sonora"; Flags: dontcreatekey uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\SonoraSpotify"; Flags: dontcreatekey uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Applications\sonora.exe"; Flags: dontcreatekey uninsdeletekey
 Root: HKA; Subkey: "Software\Poly"; Flags: uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\Poly\Capabilities"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Poly\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletevalue
@@ -240,4 +252,32 @@ end;
 function SilentUpgrade: Boolean;
 begin
   Result := WizardSilent and (WizardForm.PrevAppDir <> '');
+end;
+
+procedure MigrateDir(const SourceDir, DestDir: String);
+begin
+  if DirExists(SourceDir) then
+  begin
+    if not DirExists(DestDir) then
+    begin
+      RenameFile(SourceDir, DestDir);
+    end;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  OldUninstall: String;
+begin
+  if CurStep = ssInstall then
+  begin
+    if RegQueryStringValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8D65C17E-79E8-46D7-9A37-42E85E73F738}_is1', 'UninstallString', OldUninstall) then
+    begin
+      OldUninstall := RemoveQuotes(OldUninstall);
+      Exec(OldUninstall, '/SILENT /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+    MigrateDir(ExpandConstant('{localappdata}\sonora'), ExpandConstant('{localappdata}\poly'));
+    MigrateDir(ExpandConstant('{userappdata}\sonora'), ExpandConstant('{userappdata}\poly'));
+  end;
 end;

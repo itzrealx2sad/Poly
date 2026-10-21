@@ -15,7 +15,7 @@ mod single;
 mod thumbbar;
 mod tray;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,6 +54,7 @@ fn main() {
         }
         return;
     }
+    migrate_legacy_data();
     logging::init();
 
     let args: Vec<String> = std::env::args()
@@ -83,7 +84,7 @@ fn main() {
     let io = match state::Io::new() {
         Ok(io) => io,
         Err(error) => {
-            eprintln!("sonora: cannot start runtime: {error:#}");
+            eprintln!("poly: cannot start runtime: {error:#}");
             return;
         }
     };
@@ -99,7 +100,7 @@ fn main() {
 
     app.run(move |cx: &mut App| {
         if let Err(error) = assets::Assets.load_fonts(cx) {
-            log::error!("sonora: cannot load bundled fonts: {error:#}");
+            log::error!("poly: cannot load bundled fonts: {error:#}");
         }
 
         let database = storage::Database::standard();
@@ -617,6 +618,52 @@ unsafe extern "system" fn work_area(
 #[cfg(not(target_os = "windows"))]
 fn platform_handle(_window: &gpui::Window) -> Option<*mut std::ffi::c_void> {
     None
+}
+
+fn migrate_legacy_data() {
+    let copy_dir_all = |src: &Path, dst: &Path| -> std::io::Result<()> {
+        let mut stack = vec![(src.to_path_buf(), dst.to_path_buf())];
+        while let Some((s, d)) = stack.pop() {
+            std::fs::create_dir_all(&d)?;
+            if let Ok(entries) = std::fs::read_dir(&s) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let target = d.join(entry.file_name());
+                    if path.is_dir() {
+                        stack.push((path, target));
+                    } else if !target.exists() {
+                        let _ = std::fs::copy(&path, &target);
+                    }
+                }
+            }
+        }
+        Ok(())
+    };
+
+    if let Some(config) = dirs::config_dir() {
+        let old = config.join("sonora");
+        let new = config.join("poly");
+        if old.exists() {
+            let _ = copy_dir_all(&old, &new);
+            let _ = std::fs::remove_dir_all(&old);
+        }
+    }
+    if let Some(data) = dirs::data_local_dir() {
+        let old = data.join("sonora");
+        let new = data.join("poly");
+        if old.exists() {
+            let _ = copy_dir_all(&old, &new);
+            let _ = std::fs::remove_dir_all(&old);
+        }
+    }
+    if let Some(cache) = dirs::cache_dir() {
+        let old = cache.join("sonora");
+        let new = cache.join("poly");
+        if old.exists() {
+            let _ = copy_dir_all(&old, &new);
+            let _ = std::fs::remove_dir_all(&old);
+        }
+    }
 }
 
 #[cfg(test)]
