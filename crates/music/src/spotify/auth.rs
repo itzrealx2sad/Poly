@@ -16,8 +16,8 @@ use oauth2::{
 pub const DEFAULT_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
 pub const DEFAULT_REDIRECT_URI: &str = "http://127.0.0.1:8989/login";
 
-const PRODUCT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
-const PRODUCT_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+const PRODUCT_WAIT: std::time::Duration = std::time::Duration::from_millis(600);
+const PRODUCT_POLL: std::time::Duration = std::time::Duration::from_millis(30);
 
 pub const SCOPES: &[&str] = &[
     "playlist-read-collaborative",

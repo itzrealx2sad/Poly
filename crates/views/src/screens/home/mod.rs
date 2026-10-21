@@ -2,7 +2,6 @@
 // Portions Copyright (C) Sonora Contributors
 // Modifications Copyright (C) 2026 Poly Project Contributors
 
-mod curated;
 
 use std::rc::Rc;
 
@@ -24,7 +23,6 @@ use crate::shared::menus::{Item, ItemMenu};
 use crate::shared::shelves::{Rail, RailSpec, Shelves};
 use crate::shared::tracks::{PlaybackStatus, playback_status};
 use crate::shared::trouble;
-use curated::Curated;
 
 const STEADY: Pixels = px(0.5);
 
@@ -102,12 +100,17 @@ impl HomeView {
     ) -> AnyElement {
         let theme = *cx.theme();
         let items = self.home.read(cx).quick_picks();
-        let items = match items.is_empty() {
-            true => Curated::recommendations(),
-            false => items.as_ref().clone(),
-        };
         let layout = CardGrid::layout(width);
-        let opened = Rc::new(items.clone());
+        if items.is_empty() {
+            return Rail::pending(
+                t!("home-recommendations"),
+                layout.card,
+                layout.columns,
+                window,
+                cx,
+            );
+        }
+        let opened = Rc::new(items.as_ref().clone());
         let card = layout.card;
         let home = cx.entity().downgrade();
         let playback = self.playback.clone();
@@ -219,18 +222,14 @@ impl Render for HomeView {
 
         let picks = self.recommendations(available, window, &notify, cx);
         let sections = self.home.read(cx).sections();
-        let feeding = self.home.read(cx).is_feeding();
         let width = self.width;
-        let shelves = self
-            .shelves
-            .update(cx, |shelves, cx| match (sections.is_empty(), feeding) {
-                (true, true) => shelves.pending(width, cx),
-                (false, _) => vec![shelves.render(sections, Mode::Grid, width, window, cx)],
-                (true, false) => {
-                    let curated = Curated::sections();
-                    vec![shelves.render(Rc::new(curated), Mode::Grid, width, window, cx)]
-                }
-            });
+        let shelves = self.shelves.update(cx, |shelves, cx| {
+            if sections.is_empty() {
+                shelves.pending(width, cx)
+            } else {
+                vec![shelves.render(sections, Mode::Grid, width, window, cx)]
+            }
+        });
 
         Scroller::new("home-page", &self.scrollbar)
             .p(theme.metrics.inset)

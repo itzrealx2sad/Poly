@@ -78,10 +78,17 @@ pub async fn profile(session: &Session, user_id: &str) -> Result<UserDetail> {
 }
 
 /// The signed-in account, named and pictured from its own profile. Signing in calls this, so a
-/// profile Spotify will not hand over falls back to the bare username rather than failing.
 pub async fn own(session: &Session) -> UserProfile {
     let id = session.username();
-    let found = fetch(session, &id, 0).await.unwrap_or_default();
+    let found = match tokio::time::timeout(
+        std::time::Duration::from_millis(1500),
+        fetch(session, &id, 0),
+    )
+    .await
+    {
+        Ok(found) => found.unwrap_or_default(),
+        Err(_) => Default::default(),
+    };
     UserProfile {
         display_name: found.label().unwrap_or(&id).to_owned(),
         avatar: found.avatar(),
