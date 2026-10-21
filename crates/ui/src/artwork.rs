@@ -315,7 +315,6 @@ struct ArtworkCache {
     /// The palette of every cover decoded this run, kept apart from the frames
     /// so an eviction never costs a button its colour.
     tints: HashMap<Resource, CoverPalette>,
-    palette_tasks: HashMap<SharedString, Task<CoverPalette>>,
     bytes: usize,
     screen: usize,
     _sweep: Task<()>,
@@ -336,7 +335,6 @@ impl ArtworkCache {
                 pending: HashMap::new(),
                 soft: HashMap::new(),
                 tints: HashMap::new(),
-                palette_tasks: HashMap::new(),
                 bytes: 0,
                 screen: 0,
                 _sweep: sweeper(cx),
@@ -542,8 +540,6 @@ impl ArtworkCache {
             cx.refresh_windows();
         }
 
-        self.palette_tasks.retain(|_, task| !task.is_finished());
-
         let tiny = self.count(..SMALL_BYTES);
         let small = self.count(SMALL_BYTES..BIG_BYTES);
         let big = self.count(BIG_BYTES..);
@@ -669,7 +665,7 @@ impl ArtworkCache {
     /// The largest decode the cache holds of the same cover at no less than half of `edge`, to
     /// draw while the one at `edge` loads. A resize that moves a cover to the next edge step
     /// keeps it on screen instead of flashing the skeleton.
-    fn stand_in(&mut self, resource: &Resource, edge: u32) -> Option<Arc<RenderImage>> {
+    fn stand_in(&mut self, resource: &Resource, _edge: u32) -> Option<Arc<RenderImage>> {
         let canonical = canonical_resource(resource);
         let (_, cached) = self
             .items
@@ -800,11 +796,7 @@ pub(crate) fn sample_palette(url: SharedString, cx: &mut App) -> Task<CoverPalet
     if let Some(palette) = cover_palette(&url, cx) {
         return Task::ready(palette);
     }
-    let cache = ArtworkCache::entity(cx);
-    if let Some(task) = cache.read(cx).palette_tasks.get(&url) {
-        return task.clone();
-    }
-    let res = resource_at(url.clone(), PALETTE_EDGE);
+    let res = resource_at(url, PALETTE_EDGE);
     let load = ArtworkAssetLoader::load(
         ArtworkSource {
             resource: res,
@@ -812,16 +804,11 @@ pub(crate) fn sample_palette(url: SharedString, cx: &mut App) -> Task<CoverPalet
         },
         cx,
     );
-    let url_key = url.clone();
-    let task = cx.background_spawn(async move {
+    cx.background_spawn(async move {
         load.await
             .map(|decoded| decoded.palette)
             .unwrap_or_default()
-    });
-    cache.update(cx, |cache, _| {
-        cache.palette_tasks.insert(url_key, task.clone());
-    });
-    task
+    })
 }
 
 pub fn artwork_usage(cx: &App) -> Option<(usize, usize)> {

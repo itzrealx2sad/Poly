@@ -4,7 +4,7 @@
 
 use gpui::prelude::*;
 use gpui::{App, Context, Entity, Pixels, Render, ScrollHandle, SharedString, Window, div, px, svg};
-use router::{Destination, LibraryTab, NavEntry, Navigation, NavigationEvent, SettingsTab, navigate};
+use router::{Destination, NavEntry, Navigation, NavigationEvent, SettingsTab, navigate};
 use state::{AppSettings, Library, Pins, Playback, Session, Sonora};
 use ui::{ActiveTheme as _, Scrollbar, Tipped as _};
 

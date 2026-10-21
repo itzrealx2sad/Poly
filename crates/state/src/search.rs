@@ -243,9 +243,10 @@ impl Search {
         let sheets = self.sheets.clone();
         let asked = query.clone();
         self.lyric_task = Some(cx.spawn(async move |this, cx| {
+            let asked_inner = asked.clone();
             let matches = cx
                 .background_executor()
-                .spawn(async move { sheets.find_matching_lyrics(&asked, 10) })
+                .spawn(async move { sheets.find_matching_lyrics(&asked_inner, 10) })
                 .await;
             this.update(cx, |this, cx| {
                 if this.query != asked {

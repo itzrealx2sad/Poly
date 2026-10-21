@@ -891,15 +891,16 @@ impl Library {
     /// of that part.
     /// A shelf that has already heard from its provider is left alone.
     fn prime(&mut self, shelf: Shelf, cx: &mut Context<Self>) {
-        let session = self.session.read(cx);
-        let provider = match shelf {
-            Shelf::Streaming => session.provider_slug(),
-            Shelf::Local => (!session.local_paths().is_empty()).then(|| session.local_slug()),
+        let provider = {
+            let session = self.session.read(cx);
+            match shelf {
+                Shelf::Streaming => session.provider_slug(),
+                Shelf::Local => (!session.local_paths().is_empty()).then(|| session.local_slug()),
+            }
         };
         let Some(provider) = provider else {
             return;
         };
-
         let snapshots = self.snapshots.clone();
         let io = self.io.clone();
         self.priming[shelf.slot()] = Some(cx.spawn(async move |this, cx| {
@@ -998,10 +999,11 @@ impl Library {
     /// The provider whose name a shelf's snapshots are filed under.
     fn provider_of(&self, shelf: Shelf, cx: &App) -> Option<&'static str> {
         let session = self.session.read(cx);
-        match shelf {
+        let slug = match shelf {
             Shelf::Streaming => session.provider_slug(),
             Shelf::Local => Some(session.local_slug()),
-        }
+        };
+        slug
     }
 
     pub fn pin_targets(&self) -> Option<&[music::PinTarget]> {

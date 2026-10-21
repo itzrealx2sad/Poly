@@ -8,8 +8,9 @@ use ui::ActiveTheme as _;
 
 use gpui::prelude::*;
 use gpui::{
-    Animation, ClickEvent, Context, Entity, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, Window, div, px,
+    Animation, AnimationExt, ClickEvent, Context, Entity, FontWeight, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, Window,
+    div, px,
 };
 use i18n::t;
 use input::{ToggleFullscreen, ToggleLyrics, ToggleQueue};
@@ -343,7 +344,7 @@ impl Render for PlayerBar {
                                                     .font_weight(FontWeight::BOLD)
                                                     .text_color(theme.foreground)
                                                     .with_animation(
-                                                        ("track-marquee", SharedString::from(t.name.clone())),
+                                                        SharedString::from(format!("track-marquee-{}", t.name)),
                                                         Animation::new(Duration::from_secs(10)).repeat(),
                                                         move |this, delta| {
                                                             let offset = if delta < 0.30 {

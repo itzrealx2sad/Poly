@@ -5,8 +5,8 @@ use std::time::Instant;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Div, ElementId, Entity, Interactivity, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, ScrollWheelEvent, StyleRefinement,
-    Window, div, point, px,
+    MouseMoveEvent, MouseUpEvent, Pixels, ScrollHandle, ScrollWheelEvent, Stateful,
+    StyleRefinement, Window, div, point, px,
 };
 
 use crate::button::Button;
@@ -168,7 +168,7 @@ pub fn middle_scroll(surface: Div, bar: &Entity<Scrollbar>) -> Div {
         })
 }
 
-pub fn shelf_scroll(surface: Div, scroll: &ScrollHandle, glide: &Glide) -> Div {
+pub fn shelf_scroll(surface: Stateful<Div>, scroll: &ScrollHandle, glide: &Glide) -> Stateful<Div> {
     let drag = Rc::new(Cell::new(None));
     let drag_down = drag.clone();
     let drag_move = drag.clone();
@@ -201,7 +201,7 @@ pub fn shelf_scroll(surface: Div, scroll: &ScrollHandle, glide: &Glide) -> Div {
                 let moved = event.position.x - origin.x;
                 if moved.abs() >= px(6.) {
                     let elapsed = start_time.elapsed().as_secs_f32().max(0.016);
-                    let velocity = (event.position.x - previous.x).0 / elapsed;
+                    let velocity = (event.position.x - previous.x) / px(1.) / elapsed;
                     if velocity.abs() > 80.0 {
                         let impulse = px(velocity * 0.18);
                         let target = (scroll_up.offset().x + impulse)

@@ -129,7 +129,7 @@ fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
         .to_str()
         .ok()?
         .trim()
-        .parse::<u64>()?;
+        .parse::<u64>().ok()?;
     Some(Duration::from_secs(seconds))
 }
 
