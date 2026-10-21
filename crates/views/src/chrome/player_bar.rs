@@ -3,14 +3,13 @@
 // Modifications Copyright (C) 2026 Poly Project Contributors
 
 use router::{Destination, Link};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use ui::ActiveTheme as _;
 
 use gpui::prelude::*;
 use gpui::{
-    Animation, AnimationExt, ClickEvent, Context, Entity, FontWeight, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, Window,
-    div, px,
+    ClickEvent, Context, Entity, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, Task, Window, div, px,
 };
 use i18n::t;
 use input::{ToggleFullscreen, ToggleLyrics, ToggleQueue};
@@ -40,6 +39,8 @@ pub(crate) struct PlayerBar {
     over_volume: Option<f32>,
     volume_held: bool,
     muted: Option<f32>,
+    marquee: Option<(String, Instant)>,
+    marquee_task: Option<Task<()>>,
 }
 
 impl PlayerBar {
@@ -67,6 +68,8 @@ impl PlayerBar {
             over_volume: None,
             volume_held: false,
             muted: None,
+            marquee: None,
+            marquee_task: None,
         }
     }
 
@@ -325,85 +328,159 @@ impl Render for PlayerBar {
                             .min_w_0()
                             .child(match track {
                                 Some(t) => {
-                                    let name_len = t.name.chars().count();
-                                    let reduce_motion = cx.reduce_motion();
-                                    if name_len > 22 && !reduce_motion {
-                                        let slide_distance =
-                                            px(((name_len - 20) as f32 * 8.5).min(280.));
+                                    let author_refs = match !t.artist_refs.is_empty() {
+                                        true => t.artist_refs.clone(),
+                                        false => t
+                                            .artists
+                                            .split(", ")
+                                            .filter(|s| !s.is_empty())
+                                            .map(|name| music::ArtistRef {
+                                                name: name.to_string(),
+                                                id: None,
+                                            })
+                                            .collect(),
+                                    };
+                                    let full_key = format!("{} {}", t.name, t.artists);
+                                    let text_len = t.name.chars().count() + t.artists.chars().count() + 1;
+                                    let chars_limit = match span {
+                                        Room::Tight | Room::Snug => 18,
+                                        Room::Roomy => 24,
+                                        Room::Wide => 32,
+                                        Room::Vast => 42,
+                                    };
+                                    let max_width = match span {
+                                        Room::Tight | Room::Snug => px(200.),
+                                        Room::Roomy => px(260.),
+                                        Room::Wide => px(340.),
+                                        Room::Vast => px(440.),
+                                    };
+
+                                    let is_long = text_len > chars_limit;
+                                    let gap = 48.0;
+                                    let unit_width = (text_len as f32 * 8.5 + 24.0).max(180.0);
+                                    let total_span = unit_width + gap;
+                                    let mut offset = Pixels::ZERO;
+
+                                    if is_long {
+                                        let now = Instant::now();
+                                        let start = match &mut self.marquee {
+                                            Some((key, start)) if *key == full_key => *start,
+                                            slot => {
+                                                self.marquee_task = None;
+                                                *slot = Some((full_key.clone(), now));
+                                                now
+                                            }
+                                        };
+                                        let elapsed = now.duration_since(start).as_secs_f32();
+                                        let pause_duration = 5.0;
+                                        let speed = 20.0;
+                                        let slide_duration = (total_span / speed).max(6.0);
+                                        let cycle_duration = pause_duration + slide_duration;
+                                        let cycle = elapsed % cycle_duration;
+
+                                        if cycle < pause_duration {
+                                            offset = Pixels::ZERO;
+                                            if self.marquee_task.is_none() {
+                                                let delay = Duration::from_secs_f32(
+                                                    (pause_duration - cycle).max(0.05),
+                                                );
+                                                self.marquee_task = Some(cx.spawn(async move |this, cx| {
+                                                    cx.background_executor().timer(delay).await;
+                                                    let _ = this.update(cx, |_, cx| cx.notify());
+                                                }));
+                                            }
+                                        } else {
+                                            self.marquee_task = None;
+                                            let progress = ((cycle - pause_duration) / slide_duration)
+                                                .clamp(0.0, 1.0);
+                                            offset = -px(total_span * progress);
+                                            window.request_animation_frame();
+                                        }
+                                    } else {
+                                        self.marquee = None;
+                                        self.marquee_task = None;
+                                    }
+
+                                    let make_unit = |prefix: &'static str| {
+                                        let mut authors_row = div().flex().items_center().gap_1();
+                                        for (i, artist) in author_refs.iter().enumerate() {
+                                            if i > 0 {
+                                                authors_row = authors_row.child(
+                                                    div()
+                                                        .child(",")
+                                                        .text_color(theme.muted_foreground)
+                                                        .text_size(theme.text(ui::Text::Body)),
+                                                );
+                                            }
+                                            let mut link_item = div()
+                                                .id((prefix, i))
+                                                .child(SharedString::from(artist.name.clone()))
+                                                .text_color(theme.muted_foreground)
+                                                .text_size(theme.text(ui::Text::Body))
+                                                .whitespace_nowrap();
+                                            if let Some(id) = &artist.id {
+                                                link_item = link_item
+                                                    .cursor_pointer()
+                                                    .hover(|style| {
+                                                        style.text_color(theme.foreground).underline()
+                                                    })
+                                                    .link(Destination::Artist(id.clone().into()));
+                                            }
+                                            authors_row = authors_row.child(link_item);
+                                        }
+
                                         div()
-                                            .id("now-playing-track-marquee-container")
-                                            .overflow_hidden()
-                                            .max_w(px(220.))
+                                            .flex()
+                                            .items_center()
+                                            .gap_2()
+                                            .whitespace_nowrap()
                                             .child(
                                                 div()
-                                                    .id("now-playing-track")
-                                                    .flex()
-                                                    .whitespace_nowrap()
                                                     .child(SharedString::from(t.name.clone()))
                                                     .text_size(theme.text(ui::Text::Body))
                                                     .font_weight(FontWeight::BOLD)
-                                                    .text_color(theme.foreground)
-                                                    .with_animation(
-                                                        SharedString::from(format!("track-marquee-{}", t.name)),
-                                                        Animation::new(Duration::from_secs(10)).repeat(),
-                                                        move |this, delta| {
-                                                            let offset = if delta < 0.30 {
-                                                                Pixels::ZERO
-                                                            } else if delta < 0.70 {
-                                                                let progress = (delta - 0.30) / 0.40;
-                                                                let eased = (1.0 - (progress * std::f32::consts::PI).cos()) / 2.0;
-                                                                -slide_distance * eased
-                                                            } else if delta < 0.90 {
-                                                                -slide_distance
-                                                            } else {
-                                                                let progress = (delta - 0.90) / 0.10;
-                                                                let eased = (1.0 - (progress * std::f32::consts::PI).cos()) / 2.0;
-                                                                -slide_distance * (1.0 - eased)
-                                                            };
-                                                            this.ml(offset)
-                                                        },
-                                                    ),
+                                                    .text_color(theme.foreground),
                                             )
+                                            .child(authors_row)
+                                    };
+
+                                    let content = if is_long {
+                                        div()
+                                            .id("now-playing-track-content")
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(gap))
+                                            .whitespace_nowrap()
+                                            .relative()
+                                            .left(offset)
+                                            .child(make_unit("now-playing-author-a"))
+                                            .child(make_unit("now-playing-author-b"))
                                     } else {
                                         div()
-                                            .id("now-playing-track")
-                                            .child(SharedString::from(t.name.clone()))
-                                            .text_size(theme.text(ui::Text::Body))
-                                            .font_weight(FontWeight::BOLD)
-                                            .text_color(theme.foreground)
-                                            .truncate()
-                                    }
+                                            .id("now-playing-track-content")
+                                            .flex()
+                                            .items_center()
+                                            .whitespace_nowrap()
+                                            .child(make_unit("now-playing-author"))
+                                    };
+
+                                    div()
+                                        .id("now-playing-track-marquee-container")
+                                        .overflow_hidden()
+                                        .max_w(max_width)
+                                        .child(content)
                                 }
-                                None => div()
-                                    .id("now-playing-idle")
-                                    .child(t!("player-nothing-playing"))
-                                    .text_size(theme.text(ui::Text::Body))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(muted)
-                                    .truncate(),
-                            })
-                            .when_some(track, |this, t| {
-                                let album_text = if t.album.is_empty() {
-                                    t.name.clone()
-                                } else {
-                                    t.album.clone()
-                                };
-                                this.child(
+                                None => {
+                                    self.marquee = None;
+                                    self.marquee_task = None;
                                     div()
-                                        .child("·")
+                                        .id("now-playing-idle")
+                                        .child(t!("player-nothing-playing"))
+                                        .text_size(theme.text(ui::Text::Body))
+                                        .font_weight(FontWeight::BOLD)
                                         .text_color(muted)
-                                        .text_size(theme.text(ui::Text::Small)),
-                                )
-                                .child(
-                                    div()
-                                        .child(SharedString::from(format!(
-                                            "{} · {}",
-                                            album_text, t.artists
-                                        )))
-                                        .text_size(theme.text(ui::Text::Small))
-                                        .text_color(muted)
-                                        .truncate(),
-                                )
+                                        .truncate()
+                                }
                             })
                             .when(explicit, |this| {
                                 this.child(div().flex_none().child(ExplicitBadge::new()))
