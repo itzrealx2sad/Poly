@@ -211,7 +211,7 @@ fn begin_environment(
 fn user_data_folder() -> Result<Vec<u16>> {
     let folder = dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("sonora")
+        .join("poly")
         .join("webview2");
     std::fs::create_dir_all(&folder)
         .with_context(|| format!("cannot create {}", folder.display()))?;
@@ -231,7 +231,7 @@ fn begin_controller(
         .context("the installed WebView2 runtime does not support private profiles")?;
     let options = unsafe { environment.CreateCoreWebView2ControllerOptions() }
         .context("cannot configure the private sign-in profile")?;
-    unsafe { options.SetProfileName(w!("Sonora Sign-In")) }
+    unsafe { options.SetProfileName(w!("Poly Sign-In")) }
         .context("cannot name the sign-in profile")?;
     unsafe { options.SetIsInPrivateModeEnabled(true) }
         .context("cannot make the sign-in profile private")?;
@@ -332,7 +332,7 @@ fn create_window(title: &str) -> Result<HWND> {
     let class = WNDCLASSW {
         lpfnWndProc: Some(window_proc),
         hInstance: HINSTANCE(instance.0),
-        lpszClassName: w!("SonoraSignInWebView"),
+        lpszClassName: w!("PolySignInWebView"),
         ..Default::default()
     };
     unsafe { RegisterClassW(&class) };
@@ -353,7 +353,7 @@ fn create_window(title: &str) -> Result<HWND> {
     let hwnd = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE(0),
-            w!("SonoraSignInWebView"),
+            w!("PolySignInWebView"),
             PCWSTR(title.as_ptr()),
             WS_OVERLAPPEDWINDOW,
             x,

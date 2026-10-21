@@ -2545,7 +2545,7 @@ fn absolute_path(path: &Path) -> PathBuf {
 fn settings_path() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("sonora")
+        .join("poly")
         .join("settings.json")
 }
 

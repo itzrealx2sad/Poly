@@ -9,7 +9,7 @@ pub(crate) const FILE: &str = "credentials.json";
 pub(crate) fn root() -> PathBuf {
     dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("sonora")
+        .join("poly")
 }
 
 /// A provider's own cache folder, named by its slug.

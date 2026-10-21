@@ -6,9 +6,9 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use super::{Art, Event, Shown};
 
-const ID: &str = "sonora";
-const ICON_NAME: &str = "sonora";
-const PNG: &[u8] = include_bytes!("../../../../assets/tray/sonora.png");
+const ID: &str = "poly";
+const ICON_NAME: &str = "poly";
+const PNG: &[u8] = include_bytes!("../../../../assets/tray/poly.png");
 /// Flatpak writes this file into every sandbox it starts.
 const FLATPAK_INFO: &str = "/.flatpak-info";
 const WATCHER: &str = "org.kde.StatusNotifierWatcher";

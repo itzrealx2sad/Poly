@@ -11,7 +11,7 @@ use super::{Art, Event, Shown};
 const TOOLTIP: &str = "Poly";
 const PNG: &[u8] = match cfg!(target_os = "macos") {
     true => include_bytes!("../../../../assets/tray/template-64.png"),
-    false => include_bytes!("../../../../assets/tray/sonora.png"),
+    false => include_bytes!("../../../../assets/tray/poly.png"),
 };
 const MENU_ON_CLICK: bool = cfg!(target_os = "macos");
 

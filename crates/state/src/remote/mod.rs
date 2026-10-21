@@ -269,7 +269,7 @@ fn is_remote(cover: &str) -> bool {
 async fn artwork(url: &str) -> Result<PathBuf> {
     let dir = dirs::cache_dir()
         .unwrap_or_else(std::env::temp_dir)
-        .join("sonora")
+        .join("poly")
         .join(ARTWORK);
     let mut hasher = DefaultHasher::new();
     url.hash(&mut hasher);

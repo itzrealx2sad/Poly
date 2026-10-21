@@ -1,6 +1,6 @@
 param(
     [string]$Version = "0.0.0",
-    [string]$Executable = "target/release/sonora.exe",
+    [string]$Executable = "target/release/poly.exe",
     [string]$Output = "dist"
 )
 
@@ -12,6 +12,7 @@ New-Item -ItemType Directory -Force $outputPath | Out-Null
 
 $iscc = @(
     (Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe")
+    (Join-Path $env:ProgramFiles "Inno Setup 6/ISCC.exe")
     (Join-Path $env:LOCALAPPDATA "Programs/Inno Setup 6/ISCC.exe")
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) {
@@ -21,6 +22,8 @@ if (-not $iscc) {
 $env:SONORA_VERSION = $Version.TrimStart("v")
 $env:SONORA_EXE = $source.Path
 $env:SONORA_DIST = (Resolve-Path $outputPath).Path
+if (-not $env:SONORA_ARCH) { $env:SONORA_ARCH = "x64compatible" }
+if (-not $env:SONORA_SETUP) { $env:SONORA_SETUP = "Poly-Setup" }
 
 & $iscc (Join-Path $PSScriptRoot "sonora.iss")
 if ($LASTEXITCODE -ne 0) {
