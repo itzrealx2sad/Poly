@@ -86,7 +86,7 @@ pub struct FullscreenView {
     cover: Entity<Cover>,
     settings: Entity<AppSettings>,
     aside: Entity<Aside>,
-    panel: Option<SideTab>,
+    panel: SideTab,
     seek: ScrubberState,
     pending: Option<f32>,
     over_seek: Option<f32>,
@@ -125,9 +125,11 @@ impl FullscreenView {
         cx.observe(&library, |_, _, cx| cx.notify()).detach();
         let settings = Sonora::global(cx).settings.clone();
         cx.observe(&settings, |_, _, cx| cx.notify()).detach();
-        let panel = settings.read(cx).fullscreen_tab();
-        let shown = panel.unwrap_or(SideTab::Lyrics);
-        let aside = cx.new(|cx| Aside::new(queue.clone(), playback.clone(), shown, cx));
+        let panel = settings
+            .read(cx)
+            .fullscreen_tab()
+            .unwrap_or(SideTab::Lyrics);
+        let aside = cx.new(|cx| Aside::new(queue.clone(), playback.clone(), panel, cx));
         aside.update(cx, |aside, _| aside.strip());
         let me = cx.entity_id();
         let playlist_scrollbar = cx.new(|_| Scrollbar::inset().watching(me));
@@ -178,13 +180,11 @@ impl FullscreenView {
         window.focus(&self.focus, cx);
     }
 
-    fn show(&mut self, panel: Option<SideTab>, cx: &mut Context<Self>) {
+    fn show(&mut self, panel: SideTab, cx: &mut Context<Self>) {
         self.panel = panel;
         self.settings
-            .update(cx, |settings, cx| settings.set_fullscreen_tab(panel, cx));
-        if let Some(tab) = panel {
-            self.aside.update(cx, |aside, cx| aside.show(tab, cx));
-        }
+            .update(cx, |settings, cx| settings.set_fullscreen_tab(Some(panel), cx));
+        self.aside.update(cx, |aside, cx| aside.show(panel, cx));
         self.stir(cx);
     }
 
@@ -276,7 +276,7 @@ impl FullscreenView {
     /// rest-expiry time, so no subscription is needed: a parked pointer simply
     /// re-arms the timer instead of letting the chrome go idle under it.
     fn scrollbar_held(&self, cx: &App) -> bool {
-        self.panel.is_some() && self.aside.read(cx).scrollbar_active(cx)
+        self.aside.read(cx).scrollbar_active(cx)
     }
 
     fn flip(&mut self, awake: bool) {
@@ -723,7 +723,6 @@ impl FullscreenView {
     /// corner to the leave button.
     fn controls(&self, room: Room, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
-        let inline = self.panel.is_none();
         let clear = match room.fits(Room::Roomy) {
             true => Pixels::ZERO,
             false => theme.metrics.control_small,
@@ -739,7 +738,6 @@ impl FullscreenView {
             .max_w(px(SEEK_MAX))
             .flex_none()
             .on_click(|_, _, cx| cx.stop_propagation())
-            .when(inline, |this| this.child(self.pill(cx)))
             .child(self.seek(cx))
             .child(
                 div()
@@ -804,7 +802,7 @@ impl FullscreenView {
             }
             cx.notify();
         });
-        let tab = move |id: &'static str, icon: &'static str, hint: &'static str, panel| {
+        let tab = move |id: &'static str, icon: &'static str, hint: &'static str, panel: SideTab| {
             let showing = self.panel == panel;
 
             Button::new(id)
@@ -832,22 +830,16 @@ impl FullscreenView {
                     .rounded(theme.radius + gap)
                     .items([
                         tab(
-                            "fullscreen-artwork-tab",
-                            "icons/disc-3.svg",
-                            "fullscreen-artwork",
-                            None,
-                        ),
-                        tab(
                             "fullscreen-lyrics",
                             "icons/mic-vocal.svg",
                             "lyrics-title",
-                            Some(SideTab::Lyrics),
+                            SideTab::Lyrics,
                         ),
                         tab(
                             "fullscreen-queue",
                             "icons/list-music.svg",
                             "queue-title",
-                            Some(SideTab::Queue),
+                            SideTab::Queue,
                         ),
                     ]),
             )
@@ -1058,7 +1050,7 @@ impl Render for FullscreenView {
         let theme = *cx.theme();
         let viewport = window.viewport_size();
         let room = Room::of(viewport.width);
-        let split = room.fits(Room::Wide) && self.panel.is_some();
+        let split = room.fits(Room::Wide);
         self.watch(window, cx);
         let idle = self.hidden(window, cx);
         let hide = match self.settings.read(cx).fullscreen_controls_autohide() {
@@ -1128,10 +1120,10 @@ impl Render for FullscreenView {
         let raster_side = snapped(far, window);
         let cover_scale = presentation_scale(presented_side, raster_side);
         let lift = (presented_side - side) / 2.;
-        let staged = self.panel.is_none() || split;
+        let staged = split;
 
         let style = self.settings.read(cx).visualizer_style();
-        let visualizer_on = self.panel.is_none() && style.shown();
+        let visualizer_on = style.shown();
         match visualizer_on
             .then(|| self.playback.read(cx).spectrum(cx))
             .flatten()
@@ -1251,24 +1243,22 @@ impl Render for FullscreenView {
                                 }),
                         )
                     })
-                    .when(self.panel.is_some(), |this| {
-                        this.child(
-                            div()
-                                .id("fullscreen-panel")
-                                .relative()
-                                .flex()
-                                .flex_col()
-                                .flex_1()
-                                .min_w_0()
-                                .min_h_0()
-                                .h_full()
-                                .on_click(|_, _, cx| cx.stop_propagation())
-                                .child(self.aside.clone())
-                                .when(shown, |this| this.child(self.floating(hide, cx))),
-                        )
-                    }),
+                    .child(
+                        div()
+                            .id("fullscreen-panel")
+                            .relative()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .min_h_0()
+                            .h_full()
+                            .on_click(|_, _, cx| cx.stop_propagation())
+                            .child(self.aside.clone())
+                            .when(shown, |this| this.child(self.floating(hide, cx))),
+                    ),
             )
-            .when(!split && self.panel.is_some(), |this| {
+            .when(!split, |this| {
                 this.child(self.strip(hide, window, cx))
             })
             .when(!split, |this| {
