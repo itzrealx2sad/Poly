@@ -23,58 +23,141 @@
 use std::cell::Cell;
 use std::f32::consts::TAU;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use gpui::prelude::*;
 use gpui::{App, Bounds, Context, Hsla, Render, Rgba, Window, canvas, div, point, px};
 use state::Sonora;
 use ui::{ActiveTheme as _, Theme};
 
-/// How many blobs make up the field.
 const BLOBS: usize = 5;
-/// The widest blur, in device pixels, the renderer still runs at full resolution. It picks
-/// the buffer from the radius: four or less keeps every pixel, eight halves the frame, and
-/// anything wider drops to a quarter. The field is already drawn at `DOWNSCALE`, so a wider
-/// blur would shrink it a second time and the upscale would crawl over every seam. The discs
-/// carry the falloff instead.
-const BLUR_FULL: f32 = 8.;
-/// How many times smaller the field is drawn than it is shown. The layer is
-/// laid out at this fraction of the window and the compositor scales it back
-/// up with a bilinear sample, so the discs and the blur cost a sixteenth of
-/// the pixels. Nothing in the field is sharper than the blur, so the upscale
-/// shows nothing.
+const BLUR_FULL: f32 = 14.;
 const DOWNSCALE: f32 = 4.;
-/// How much of itself the field keeps under the dark overlay that holds lyrics readable over
-/// it. The overlay is folded into the colours rather than painted as a sheet of its own: over
-/// an opaque stack multiplying every layer by what it lets through is the same picture, and a
-/// black sheet this strong was most of what a see-through window's alpha went on.
 const SHADE: f32 = 0.20;
-
-const GRID_SIZE: usize = 6;
-const GRID_MAP: [[usize; GRID_SIZE]; GRID_SIZE] = [
-    [0, 1, 3, 2, 0, 4],
-    [2, 4, 0, 1, 3, 1],
-    [1, 0, 2, 4, 1, 0],
-    [3, 2, 1, 0, 4, 2],
-    [0, 4, 3, 2, 0, 1],
-    [4, 1, 0, 3, 2, 4],
-];
-
+const DISCS: usize = 12;
+const DISC_FAINT: f32 = 0.03;
+const DISC_STRONG: f32 = 0.32;
 const WASH: f32 = 0.8;
+
+struct BlobSpec {
+    color_idx: usize,
+    secondary_idx: usize,
+    base_x: f32,
+    base_y: f32,
+    size: f32,
+    period_x: f32,
+    period_y: f32,
+    phase_x: f32,
+    phase_y: f32,
+    amp_x: f32,
+    amp_y: f32,
+    pulse_period: f32,
+    pulse_amp: f32,
+}
+
+const SPECS: [BlobSpec; 6] = [
+    BlobSpec {
+        color_idx: 0,
+        secondary_idx: 1,
+        base_x: 0.35,
+        base_y: 0.38,
+        size: 1.35,
+        period_x: 26.,
+        period_y: 34.,
+        phase_x: 0.0,
+        phase_y: 1.2,
+        amp_x: 0.16,
+        amp_y: 0.13,
+        pulse_period: 18.,
+        pulse_amp: 0.08,
+    },
+    BlobSpec {
+        color_idx: 2,
+        secondary_idx: 0,
+        base_x: 0.65,
+        base_y: 0.62,
+        size: 1.30,
+        period_x: 32.,
+        period_y: 24.,
+        phase_x: 2.1,
+        phase_y: 0.5,
+        amp_x: 0.17,
+        amp_y: 0.14,
+        pulse_period: 22.,
+        pulse_amp: 0.09,
+    },
+    BlobSpec {
+        color_idx: 1,
+        secondary_idx: 2,
+        base_x: 0.22,
+        base_y: 0.26,
+        size: 0.95,
+        period_x: 21.,
+        period_y: 28.,
+        phase_x: 3.5,
+        phase_y: 4.1,
+        amp_x: 0.20,
+        amp_y: 0.16,
+        pulse_period: 15.,
+        pulse_amp: 0.11,
+    },
+    BlobSpec {
+        color_idx: 3,
+        secondary_idx: 4,
+        base_x: 0.78,
+        base_y: 0.74,
+        size: 1.05,
+        period_x: 35.,
+        period_y: 29.,
+        phase_x: 1.8,
+        phase_y: 3.2,
+        amp_x: 0.19,
+        amp_y: 0.15,
+        pulse_period: 24.,
+        pulse_amp: 0.09,
+    },
+    BlobSpec {
+        color_idx: 4,
+        secondary_idx: 0,
+        base_x: 0.78,
+        base_y: 0.24,
+        size: 0.92,
+        period_x: 24.,
+        period_y: 30.,
+        phase_x: 4.7,
+        phase_y: 2.3,
+        amp_x: 0.22,
+        amp_y: 0.17,
+        pulse_period: 19.,
+        pulse_amp: 0.10,
+    },
+    BlobSpec {
+        color_idx: 0,
+        secondary_idx: 3,
+        base_x: 0.26,
+        base_y: 0.78,
+        size: 0.98,
+        period_x: 29.,
+        period_y: 22.,
+        phase_x: 5.2,
+        phase_y: 1.7,
+        amp_x: 0.21,
+        amp_y: 0.16,
+        pulse_period: 17.,
+        pulse_amp: 0.10,
+    },
+];
 
 pub(crate) struct Ambient {
     started: Instant,
     stepped: Instant,
     bounds: Rc<Cell<Bounds<gpui::Pixels>>>,
     painted: Option<[Hsla; BLOBS]>,
-    animating: bool,
 }
 
 impl Ambient {
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let settings = Sonora::global(cx).settings.clone();
-        // Turning the drift back on has no frame of its own to land in: with
-        // motion off nothing asks for one.
         cx.observe(&settings, |_, _, cx| cx.notify()).detach();
 
         let now = Instant::now();
@@ -83,7 +166,6 @@ impl Ambient {
             stepped: now,
             bounds: Rc::new(Cell::new(Bounds::default())),
             painted: None,
-            animating: false,
         }
     }
 
@@ -230,56 +312,26 @@ impl Ambient {
 impl Render for Ambient {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
-        // Without motion the field is a still gradient: no frame requests, so
         let animates = window.is_window_active()
             && ui::motion::animates(cx)
             && Sonora::global(cx).settings.read(cx).ambient_motion();
-        if animates && !self.animating {
-            self.animating = true;
-            cx.spawn(async move |this, cx| {
-                loop {
-                    cx.background_executor().timer(Duration::from_millis(30)).await;
-                    let running = this.update(cx, |this, cx| {
-                        let active = Sonora::global(cx).settings.read(cx).ambient_motion()
-                            && ui::motion::animates(cx);
-                        if active && this.animating {
-                            cx.notify();
-                            true
-                        } else {
-                            this.animating = false;
-                            false
-                        }
-                    });
-                    if !running.unwrap_or(false) {
-                        break;
-                    }
-                }
-            }).detach();
-        } else if !animates && self.animating {
-            self.animating = false;
+        if animates {
+            window.request_animation_frame();
         }
         let elapsed = match animates {
             true => self.started.elapsed().as_secs_f32(),
             false => 0.,
         };
         let colors = self.wash(Self::colors(&theme), animates);
-        // The field stands in for the page rather than sitting on it, so it carries the
-        // window's own opacity and `Root` paints no background beneath it. One opacity thins
-        // every layer at once; a quad still adds to what it covers, which is why the blobs
-        // read a shade denser than the gaps between them.
         let clarity = match theme.transparent {
             true => theme.background.a,
             false => 1.,
         };
-        // Geometry resolves against the layer's own pixel bounds, measured a
-        // frame ago by the canvas, so the discs stay circular at any window
-        // aspect ratio. The field is laid out at a fraction of those bounds
-        // and scaled back up from the top left corner.
         let bounds = self.bounds.get();
         let wide = bounds.size.width.as_f32().max(1.) / DOWNSCALE;
         let high = bounds.size.height.as_f32().max(1.) / DOWNSCALE;
-        // The field reaches into the corners the chrome rounds, and GPUI clips only to a
-        // rectangle, so the sheet takes the window's radius itself.
+        let dim = wide.max(high);
+
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let radius = crate::chrome::window_radius(Sonora::global(cx).settings.read(cx), cx, window);
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
@@ -316,9 +368,6 @@ impl Render for Ambient {
                         }),
                     }),
             )
-            // The blur spreads the blobs past any shape they could be cut to, so a rounded window
-            // fades them out toward every edge instead. The fade sits on an unblurred layer the
-            // size of the window, since a blurred one measures it from past its own blur reach.
             .child(
                 div()
                     .absolute()
@@ -337,38 +386,49 @@ impl Render for Ambient {
                             .layer_scale(DOWNSCALE)
                             .layer_scale_origin(point(0., 0.))
                             .blur(px(BLUR_FULL / window.scale_factor()))
-                            .children((0..GRID_SIZE).flat_map(|row| {
-                                let colors = colors;
-                                (0..GRID_SIZE).map(move |col| {
-                                    let cell_w = wide / GRID_SIZE as f32;
-                                    let cell_h = high / GRID_SIZE as f32;
-                                    let primary_idx = GRID_MAP[row][col];
-                                    let secondary_idx = (primary_idx + 1 + (row + col) % 3) % BLOBS;
-                                    let color = match animates {
-                                        true => {
-                                            let period = 18. + ((row * 7 + col * 11) % 15) as f32;
-                                            let phase = row as f32 * 1.3 + col as f32 * 1.7;
-                                            let spin = TAU * elapsed / period;
-                                            let t = 0.5 + 0.5 * (spin + phase).sin();
-                                            blend(colors[primary_idx], colors[secondary_idx], t * 0.45)
-                                        }
-                                        false => colors[primary_idx],
-                                    };
-                                    div()
-                                        .absolute()
-                                        .left(px(col as f32 * cell_w))
-                                        .top(px(row as f32 * cell_h))
-                                        .w(px(cell_w + 1.5))
-                                        .h(px(cell_h + 1.5))
-                                        .bg(shaded(color))
-                                })
+                            .children(SPECS.iter().map(|spec| {
+                                let spin_x = TAU * elapsed / spec.period_x;
+                                let spin_y = TAU * elapsed / spec.period_y;
+                                let x = match animates {
+                                    true => spec.base_x + spec.amp_x * (spin_x + spec.phase_x).sin(),
+                                    false => spec.base_x,
+                                };
+                                let y = match animates {
+                                    true => spec.base_y + spec.amp_y * (spin_y + spec.phase_y).cos(),
+                                    false => spec.base_y,
+                                };
+                                let pulse_spin = TAU * elapsed / spec.pulse_period;
+                                let grown = match animates {
+                                    true => dim * spec.size * (1. + spec.pulse_amp * (pulse_spin + spec.phase_x).sin()),
+                                    false => dim * spec.size,
+                                };
+                                let color_spin = TAU * elapsed / (spec.period_x * 0.75);
+                                let color_t = match animates {
+                                    true => 0.5 + 0.35 * (color_spin + spec.phase_y).sin(),
+                                    false => 0.,
+                                };
+                                let color = blend(colors[spec.color_idx], colors[spec.secondary_idx], color_t);
+                                div()
+                                    .absolute()
+                                    .left(px(x * wide - grown / 2.))
+                                    .top(px(y * high - grown / 2.))
+                                    .size(px(grown))
+                                    .children((0..DISCS).map(move |step| {
+                                        let progress = step as f32 / (DISCS as f32 - 1.);
+                                        let radius_factor = 1.0 - (step as f32 / DISCS as f32) * 0.75;
+                                        let opacity = DISC_FAINT + progress * progress * (DISC_STRONG - DISC_FAINT);
+                                        let stepped = grown * radius_factor;
+                                        div()
+                                            .absolute()
+                                            .left(px((grown - stepped) / 2.))
+                                            .top(px((grown - stepped) / 2.))
+                                            .size(px(stepped))
+                                            .rounded_full()
+                                            .bg(shaded(color).opacity(opacity))
+                                    }))
                             })),
                     ),
             )
-            // Every buffer the field passes through holds eight bits a channel, and a gradient
-            // this wide and this dark steps through only a few dozen of them, so its steps read
-            // as bands that slide with the blobs. The dither scatters each step over
-            // neighbouring pixels instead.
             .child(ui::grain(window))
     }
 }
