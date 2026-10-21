@@ -138,8 +138,8 @@ impl Render for SidebarLeft {
                 .flex()
                 .items_center()
                 .justify_center()
-                .size(px(40.))
-                .rounded(px(12.))
+                .size(px(36.))
+                .rounded(px(10.))
                 .cursor_pointer()
                 .when(active, |this| this.bg(theme.foreground.opacity(0.1)))
                 .when(!active, |this| {
@@ -153,7 +153,7 @@ impl Render for SidebarLeft {
                 .child(
                     svg()
                         .path(icons::path(icon))
-                        .size(px(20.))
+                        .size(px(18.))
                         .text_color(tint),
                 )
                 .tip_label(tip, ui::Perch::Pointer)
@@ -181,7 +181,7 @@ impl Render for SidebarLeft {
             .justify_between()
             .w(px(64.))
             .h_full()
-            .py(px(16.))
+            .py(px(12.))
             .rounded(px(16.))
             .border_1()
             .border_color(theme.border)
@@ -196,22 +196,22 @@ impl Render for SidebarLeft {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(24.))
+                    .gap(px(12.))
                     .child(
                         div()
                             .id("poly-logo-btn")
                             .flex()
                             .items_center()
                             .justify_center()
-                            .size(px(40.))
-                            .rounded(px(12.))
+                            .size(px(36.))
+                            .rounded(px(10.))
                             .cursor_pointer()
                             .hover(|style| style.bg(theme.foreground.opacity(0.08)))
                             .text_color(theme.foreground)
                             .child(
                                 svg()
                                     .path(icons::path("icons/poly-logo.svg"))
-                                    .size(px(24.))
+                                    .size(px(20.))
                                     .text_color(theme.foreground),
                             )
                             .tip_label("Poly Music", ui::Perch::Pointer)
@@ -222,7 +222,7 @@ impl Render for SidebarLeft {
                             .flex()
                             .flex_col()
                             .items_center()
-                            .gap(px(8.))
+                            .gap(px(4.))
                             .children(nav_items),
                     ),
             )

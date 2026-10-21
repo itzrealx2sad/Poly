@@ -1036,6 +1036,10 @@ impl AppleClient {
 
 #[async_trait]
 impl MusicApi for AppleClient {
+    fn supports_lossless(&self) -> bool {
+        true
+    }
+
     fn share_url(&self, kind: MediaKind, id: &str) -> Option<String> {
         let part = match kind {
             MediaKind::Track => "song",

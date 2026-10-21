@@ -803,6 +803,18 @@ impl AppSettings {
         self.values.crossfade_duration.clamp(1, 12)
     }
 
+    pub fn streaming_quality(&self) -> &str {
+        if self.values.apple_quality == "lossless" || self.values.spotify_quality == "lossless" {
+            "lossless"
+        } else if self.values.spotify_quality == "low" || self.values.apple_quality == "low" {
+            "low"
+        } else if self.values.spotify_quality == "medium" || self.values.apple_quality == "medium" {
+            "medium"
+        } else {
+            "high"
+        }
+    }
+
     pub fn spotify_quality(&self) -> &str {
         &self.values.spotify_quality
     }
@@ -1267,6 +1279,18 @@ impl AppSettings {
         }
         self.values.apple_spatial_audio = enabled;
         self.schedule_save(cx);
+    }
+
+    pub fn set_streaming_quality(&mut self, quality: String, cx: &mut Context<Self>) {
+        let (spot, apple, yt) = match quality.as_str() {
+            "low" => ("low", "low", "low"),
+            "medium" => ("medium", "medium", "medium"),
+            "lossless" => ("high", "lossless", "high"),
+            _ => ("high", "high", "high"),
+        };
+        self.set_spotify_quality(spot.to_owned(), cx);
+        self.set_apple_quality(apple.to_owned(), cx);
+        self.set_youtube_quality(yt.to_owned(), cx);
     }
 
     pub fn set_youtube_quality(&mut self, quality: String, cx: &mut Context<Self>) {

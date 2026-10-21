@@ -38,6 +38,14 @@ impl MusicApi for LibrespotClient {
         !self.session.is_invalid()
     }
 
+    fn supports_lossless(&self) -> bool {
+        let country = self.session.country();
+        matches!(
+            country.to_uppercase().as_str(),
+            "US" | "SE" | "GB" | "UK" | "DE" | "JP" | "CA" | "AU"
+        )
+    }
+
     fn share_url(&self, kind: MediaKind, id: &str) -> Option<String> {
         let kind = match kind {
             MediaKind::Track => "track",

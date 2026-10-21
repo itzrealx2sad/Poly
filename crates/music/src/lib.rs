@@ -110,6 +110,10 @@ pub trait MusicApi: Send + Sync {
         true
     }
 
+    fn supports_lossless(&self) -> bool {
+        false
+    }
+
     fn share_url(&self, kind: MediaKind, id: &str) -> Option<String>;
     async fn profile(&self) -> Result<UserProfile>;
 

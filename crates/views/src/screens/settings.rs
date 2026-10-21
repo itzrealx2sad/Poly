@@ -181,6 +181,7 @@ enum Slot {
     Crossfade,
     CrossfadeMode,
     CrossfadeDuration,
+    StreamingQuality,
     SpotifyQuality,
     AppleQuality,
     AppleSpatialAudio,
@@ -642,10 +643,8 @@ impl SettingsView {
                 }
                 slots.extend([
                     Slot::Title("settings-group-quality"),
-                    Slot::SpotifyQuality,
-                    Slot::AppleQuality,
+                    Slot::StreamingQuality,
                     Slot::AppleSpatialAudio,
-                    Slot::YouTubeQuality,
                     Slot::Sleep,
                     Slot::StayAwake,
                 ]);
@@ -816,6 +815,10 @@ impl SettingsView {
             Slot::CrossfadeDuration => (
                 t!("settings-crossfade-duration"),
                 t!("settings-crossfade-duration-detail"),
+            ),
+            Slot::StreamingQuality => (
+                t!("settings-streaming-quality"),
+                t!("settings-streaming-quality-detail"),
             ),
             Slot::SpotifyQuality => (
                 t!("settings-spotify-quality"),
@@ -1053,6 +1056,7 @@ impl SettingsView {
             Slot::Crossfade => self.crossfade_row(cx).element,
             Slot::CrossfadeMode => self.crossfade_mode_row(cx).element,
             Slot::CrossfadeDuration => self.crossfade_duration_row(cx).element,
+            Slot::StreamingQuality => self.streaming_quality_row(cx).element,
             Slot::SpotifyQuality => self.spotify_quality_row(cx).element,
             Slot::AppleQuality => self.apple_quality_row(cx).element,
             Slot::AppleSpatialAudio => self.apple_spatial_audio_row(cx).element,
@@ -2456,6 +2460,78 @@ impl SettingsView {
         )
     }
 
+    fn streaming_quality_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let current = self.settings.read(cx).streaming_quality().to_owned();
+        let supports_lossless = self.session.read(cx).supports_lossless();
+        let label = match current.as_str() {
+            "low" => "Low (96 kbps)",
+            "medium" => "Normal (160 kbps)",
+            "lossless" if supports_lossless => "Hi-Res Lossless",
+            _ => "High (320 kbps)",
+        };
+
+        let mut lossless_item = MenuItem::new("streaming-quality-lossless", "Hi-Res Lossless");
+        if supports_lossless {
+            lossless_item = lossless_item
+                .selected(current == "lossless")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.set_streaming_quality("lossless".to_owned(), cx);
+                    });
+                    this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                    cx.notify();
+                }));
+        } else {
+            lossless_item = lossless_item
+                .disabled()
+                .tooltip("Requires Apple Music or supported lossless region");
+        }
+
+        let picker = Picker::new("streaming-quality", &self.popovers, label)
+            .width(Picker::NARROW)
+            .items([
+                MenuItem::new("streaming-quality-low", "Low (96 kbps)")
+                    .selected(current == "low")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_streaming_quality("low".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("streaming-quality-medium", "Normal (160 kbps)")
+                    .selected(current == "medium")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_streaming_quality("medium".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("streaming-quality-high", "High (320 kbps)")
+                    .selected(current == "high" || (!supports_lossless && current == "lossless"))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_streaming_quality("high".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                lossless_item,
+            ]);
+
+        self.row(
+            t!("settings-streaming-quality"),
+            t!("settings-streaming-quality-detail"),
+            muted,
+            small,
+            picker.into_any_element(),
+        )
+    }
+
     fn spotify_quality_row(&self, cx: &mut Context<Self>) -> Setting {
         let theme = *cx.theme();
         let muted = theme.muted_foreground;
@@ -2575,9 +2651,14 @@ impl SettingsView {
         let muted = theme.muted_foreground;
         let small = theme.text(Text::Small);
         let on = self.settings.read(cx).apple_spatial_audio();
+        let supports_spatial = self.session.read(cx).supports_spatial_audio();
 
-        let switch = Switch::new("apple-spatial-audio", on)
+        let switch = Switch::new("apple-spatial-audio", on && supports_spatial)
+            .disabled(!supports_spatial)
             .on_click(cx.listener(move |this, _, _, cx| {
+                if !supports_spatial {
+                    return;
+                }
                 if on {
                     this.settings.update(cx, |settings, cx| {
                         settings.set_apple_spatial_audio(false, cx);
@@ -2599,9 +2680,14 @@ impl SettingsView {
                 }
             }));
 
+        let detail = match supports_spatial {
+            true => t!("settings-apple-spatial-audio-detail"),
+            false => SharedString::from("Requires an Apple Music account"),
+        };
+
         self.row(
             t!("settings-apple-spatial-audio"),
-            t!("settings-apple-spatial-audio-detail"),
+            detail,
             muted,
             small,
             switch.into_any_element(),

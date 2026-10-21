@@ -402,6 +402,21 @@ impl Session {
         )
     }
 
+    pub fn supports_lossless(&self) -> bool {
+        if self.provider_slug() == Some("apple") {
+            return true;
+        }
+        if let Some(client) = self.client.as_ref() {
+            client.supports_lossless()
+        } else {
+            false
+        }
+    }
+
+    pub fn supports_spatial_audio(&self) -> bool {
+        self.provider_slug() == Some("apple")
+    }
+
     pub fn restore(&mut self, cx: &mut Context<Self>) {
         if self.is_pending() {
             return;
