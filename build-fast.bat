@@ -1,41 +1,34 @@
 @echo off
 setlocal
 
-:: ─────────────────────────────────────────────────
-::  Poly Fast Build
-::  Maximizes cargo build speed for iterative dev
-:: ─────────────────────────────────────────────────
+set "CARGO_BUILD_JOBS=%NUMBER_OF_PROCESSORS%"
+if not defined CARGO_BUILD_JOBS set "CARGO_BUILD_JOBS=4"
+set "CARGO_INCREMENTAL=1"
+set "CARGO_PROFILE_DEV_DEBUG=0"
+set "CARGO_PROFILE_DEV_INCREMENTAL=true"
+set "CARGO_PROFILE_DEV_CODEGEN_UNITS=16"
 
-:: Parallelize codegen within each crate (8 logical cores)
-set CARGO_BUILD_JOBS=8
-set RUSTFLAGS=-C codegen-units=16 -C debuginfo=0
-
-:: Share a single build cache across incremental rebuilds
-set CARGO_INCREMENTAL=1
-
-:: If you have sccache installed, enable it for cross-session caching
 where sccache >nul 2>nul
-if %ERRORLEVEL%==0 (
+if not errorlevel 1 (
     echo [*] sccache detected, enabling shared compile cache
-    set RUSTC_WRAPPER=sccache
+    set "RUSTC_WRAPPER=sccache"
 )
 
 echo.
-echo ══════════════════════════════════════════
-echo   Poly — Fast Dev Build
+echo ==========================================
+echo   Poly - Fast Development Build
 echo   Jobs: %CARGO_BUILD_JOBS%  Codegen units: 16
-echo ══════════════════════════════════════════
+echo ==========================================
 echo.
 
-:: Build only the final binary crate (pulls in workspace deps automatically)
-:: Skips any crates not in the dependency chain
-cargo build --package poly %*
+cargo build --locked --package poly %*
+set "BUILD_EXIT=%ERRORLEVEL%"
 
 echo.
-if %ERRORLEVEL%==0 (
+if "%BUILD_EXIT%"=="0" (
     echo [OK] Build succeeded
 ) else (
-    echo [FAIL] Build failed with code %ERRORLEVEL%
+    echo [FAIL] Build failed with code %BUILD_EXIT%
 )
 
-endlocal
+endlocal & exit /b %BUILD_EXIT%
