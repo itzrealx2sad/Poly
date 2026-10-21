@@ -2,8 +2,9 @@ use std::time::Duration;
 
 use gpui::prelude::*;
 use gpui::{
-    Anchor, AnyView, App, Context, DispatchPhase, MouseMoveEvent, Pixels, Point, SharedString,
-    Window, anchored, canvas, div, point, px,
+    Anchor, Animation, AnimationExt as _, AnyView, App, Context, DispatchPhase, FontWeight,
+    MouseMoveEvent, Pixels, Point, SharedString, Window, anchored, canvas, div, ease_out_quint,
+    point, px,
 };
 
 use crate::metrics::Text;
@@ -111,26 +112,48 @@ impl Render for Tooltip {
             ),
         };
 
+        let content = div()
+            .px(px(10.))
+            .py(px(5.))
+            .rounded(theme.radius)
+            .border_1()
+            .border_color(theme.border)
+            .bg(theme.popover)
+            .shadow_md()
+            .text_size(theme.text(Text::Small))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme.popover_foreground)
+            .child(match self.raw {
+                true => self.text.clone(),
+                false => i18n::lookup(&self.text, None),
+            })
+            .when(follow, |this| this.child(tracker()));
+
+        let perch = self.perch;
+        let animated = content.with_animation(
+            cx.entity_id(),
+            Animation::new(Duration::from_millis(150)).with_easing(ease_out_quint()),
+            move |this, delta| {
+                let t = delta.clamp(0., 1.);
+                let (dx, dy, origin) = match perch {
+                    Perch::Right => (-8. * (1. - t), 0., point(0.0, 0.5)),
+                    Perch::Above => (0., 4. * (1. - t), point(0.5, 1.0)),
+                    Perch::Pointer | Perch::Follow => (0., -4. * (1. - t), point(0.0, 0.0)),
+                };
+                this.opacity(t)
+                    .relative()
+                    .left(px(dx))
+                    .top(px(dy))
+                    .layer_scale(0.90 + 0.10 * t)
+                    .layer_scale_origin(origin)
+            },
+        );
+
         anchored()
             .position(position)
             .anchor(anchor)
             .snap_to_window_with_margin(MARGIN)
-            .child(
-                div()
-                    .px_2()
-                    .py_1()
-                    .rounded(theme.radius)
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.popover)
-                    .text_size(theme.text(Text::Small))
-                    .text_color(theme.popover_foreground)
-                    .child(match self.raw {
-                        true => self.text.clone(),
-                        false => i18n::lookup(&self.text, None),
-                    })
-                    .when(follow, |this| this.child(tracker())),
-            )
+            .child(animated)
     }
 }
 

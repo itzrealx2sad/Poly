@@ -21,27 +21,23 @@ pub enum NavEntry {
     Home,
     Search,
     Library,
-    Songs,
     Albums,
     Playlists,
     Artists,
     History,
     Local,
-    Pins,
 }
 
 impl NavEntry {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 8] = [
         Self::Home,
         Self::Search,
         Self::Library,
-        Self::Songs,
         Self::Albums,
         Self::Playlists,
         Self::Artists,
         Self::History,
         Self::Local,
-        Self::Pins,
     ];
 
     pub fn id(self) -> &'static str {
@@ -49,13 +45,11 @@ impl NavEntry {
             Self::Home => "home",
             Self::Search => "search",
             Self::Library => "library",
-            Self::Songs => "songs",
             Self::Albums => "albums",
             Self::Playlists => "playlists",
             Self::Artists => "artists",
             Self::History => "history",
             Self::Local => "local",
-            Self::Pins => "sidebar-pins",
         }
     }
 
@@ -64,13 +58,11 @@ impl NavEntry {
             Self::Home => "nav-home",
             Self::Search => "nav-search",
             Self::Library => "nav-library",
-            Self::Songs => "nav-songs",
             Self::Albums => "nav-albums",
             Self::Playlists => "nav-playlists",
             Self::Artists => "nav-artists",
             Self::History => "nav-history",
             Self::Local => "nav-local",
-            Self::Pins => "nav-pinned",
         }
     }
 
@@ -79,13 +71,11 @@ impl NavEntry {
             Self::Home => "icons/house.svg",
             Self::Search => "icons/search.svg",
             Self::Library => "icons/bookmark.svg",
-            Self::Songs => "icons/music.svg",
             Self::Albums => "icons/disc-3.svg",
             Self::Playlists => "icons/list-music.svg",
             Self::Artists => "icons/mic-2.svg",
             Self::History => "icons/rotate-ccw-clock.svg",
             Self::Local => "icons/folder-plus.svg",
-            Self::Pins => "icons/pin.svg",
         }
     }
 
@@ -94,13 +84,11 @@ impl NavEntry {
             Self::Home => Destination::Home,
             Self::Search => Destination::Search,
             Self::Library => Destination::Library(LibraryTab::Songs),
-            Self::Songs => Destination::Library(LibraryTab::Songs),
             Self::Albums => Destination::Library(LibraryTab::Albums),
             Self::Playlists => Destination::Library(LibraryTab::Playlists),
             Self::Artists => Destination::Library(LibraryTab::Artists),
             Self::History => Destination::History,
             Self::Local => Destination::Local(LibraryTab::Songs),
-            Self::Pins => Destination::Library(LibraryTab::Songs),
         }
     }
 
@@ -109,13 +97,11 @@ impl NavEntry {
             Self::Home => matches!(current, Destination::Home),
             Self::Search => matches!(current, Destination::Search),
             Self::Library => matches!(current, Destination::Library(_)),
-            Self::Songs => matches!(current, Destination::Library(LibraryTab::Songs)),
             Self::Albums => matches!(current, Destination::Library(LibraryTab::Albums)),
             Self::Playlists => matches!(current, Destination::Library(LibraryTab::Playlists)),
             Self::Artists => matches!(current, Destination::Library(LibraryTab::Artists)),
             Self::History => matches!(current, Destination::History),
             Self::Local => matches!(current, Destination::Local(_)),
-            Self::Pins => false,
         }
     }
 }

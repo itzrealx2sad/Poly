@@ -168,51 +168,83 @@ pub fn middle_scroll(surface: Div, bar: &Entity<Scrollbar>) -> Div {
         })
 }
 
+#[derive(Clone, Copy)]
+struct ShelfDrag {
+    origin: Point<Pixels>,
+    previous: Point<Pixels>,
+    start_time: Instant,
+    dragged: bool,
+}
+
 pub fn shelf_scroll(surface: Stateful<Div>, scroll: &ScrollHandle, glide: &Glide) -> Stateful<Div> {
-    let drag = Rc::new(Cell::new(None));
+    let drag = Rc::new(Cell::new(None::<ShelfDrag>));
     let drag_down = drag.clone();
     let drag_move = drag.clone();
     let drag_up = drag.clone();
     let drag_up_out = drag.clone();
     let scroll_move = scroll.clone();
     let scroll_up = scroll.clone();
+    let scroll_up_out = scroll.clone();
+    let glide_move = glide.clone();
     let glide_up = glide.clone();
+    let glide_up_out = glide.clone();
 
     surface
-        .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, _| {
-            drag_down.set(Some((event.position, event.position, Instant::now())));
-        })
-        .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
-            let Some((origin, previous, start_time)) = drag_move.get() else {
-                return;
-            };
-            let moved = event.position.x - origin.x;
-            if moved.abs() >= px(6.) {
-                drag_move.set(Some((origin, event.position, start_time)));
-                scroll_move.set_offset(point(
-                    (scroll_move.offset().x + event.position.x - previous.x)
-                        .clamp(-scroll_move.max_offset().x, Pixels::ZERO),
-                    scroll_move.offset().y,
-                ));
+        .capture_any_mouse_down(move |event, _, _| {
+            if event.button == MouseButton::Left {
+                drag_down.set(Some(ShelfDrag {
+                    origin: event.position,
+                    previous: event.position,
+                    start_time: Instant::now(),
+                    dragged: false,
+                }));
             }
         })
-        .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, window, _| {
-            if let Some((origin, previous, start_time)) = drag_up.take() {
-                let moved = event.position.x - origin.x;
-                if moved.abs() >= px(6.) {
-                    let elapsed = start_time.elapsed().as_secs_f32().max(0.016);
-                    let velocity = (event.position.x - previous.x) / px(1.) / elapsed;
-                    if velocity.abs() > 80.0 {
-                        let impulse = px(velocity * 0.18);
+        .on_mouse_move(move |event: &MouseMoveEvent, window, _| {
+            let Some(mut state) = drag_move.get() else {
+                return;
+            };
+            let moved = event.position.x - state.origin.x;
+            if moved.abs() >= px(4.) || state.dragged {
+                state.dragged = true;
+                let dx = event.position.x - state.previous.x;
+                state.previous = event.position;
+                drag_move.set(Some(state));
+                let target = (scroll_move.offset().x + dx)
+                    .clamp(-scroll_move.max_offset().x, Pixels::ZERO);
+                scroll_move.set_offset(point(target, scroll_move.offset().y));
+                glide_move.sync(&scroll_move);
+                window.refresh();
+            }
+        })
+        .capture_any_mouse_up(move |event, window, cx| {
+            if event.button != MouseButton::Left {
+                return;
+            }
+            if let Some(state) = drag_up.take() {
+                if state.dragged {
+                    cx.stop_propagation();
+                    let elapsed = state.start_time.elapsed().as_secs_f32().max(0.016);
+                    let velocity = (event.position.x - state.previous.x) / px(1.) / elapsed;
+                    if velocity.abs() > 40.0 {
+                        let impulse = px(velocity * 0.22);
                         let target = (scroll_up.offset().x + impulse)
                             .clamp(-scroll_up.max_offset().x, Pixels::ZERO);
                         glide_up.aim(&scroll_up, point(target, scroll_up.offset().y), window);
+                    } else {
+                        glide_up.sync(&scroll_up);
                     }
+                    window.refresh();
                 }
             }
         })
-        .on_mouse_up_out(MouseButton::Left, move |_, _, _| {
-            drag_up_out.set(None);
+        .on_mouse_up_out(MouseButton::Left, move |_, window, _| {
+            if let Some(state) = drag_up_out.take() {
+                if state.dragged {
+                    glide_up_out.sync(&scroll_up_out);
+                    window.refresh();
+                }
+            }
         })
 }
 
