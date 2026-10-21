@@ -4,8 +4,8 @@ use std::time::Instant;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Div, ElementId, Entity, Interactivity, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, ScrollHandle, ScrollWheelEvent, Stateful,
+    AnyElement, App, Div, ElementId, Entity, Interactivity, MouseButton,
+    MouseMoveEvent, Pixels, Point, ScrollHandle, ScrollWheelEvent, Stateful,
     StyleRefinement, Window, div, point, px,
 };
 

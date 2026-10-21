@@ -131,7 +131,7 @@ impl Render for Tooltip {
 
         let perch = self.perch;
         let animated = content.with_animation(
-            cx.entity_id(),
+            ("tooltip", cx.entity_id()),
             Animation::new(Duration::from_millis(150)).with_easing(ease_out_quint()),
             move |this, delta| {
                 let t = delta.clamp(0., 1.);
