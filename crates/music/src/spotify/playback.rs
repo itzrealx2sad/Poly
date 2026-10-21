@@ -2,6 +2,7 @@
 // Portions Copyright (C) Sonora Contributors
 // Modifications Copyright (C) 2026 Poly Project Contributors
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -25,21 +26,39 @@ use crate::{
 const TRACK_PREFIX: &str = "spotify:track:";
 const STALE_POSITIONS: u8 = 2;
 
+const DECK_STOPPED: u8 = 0;
+const DECK_LOADING: u8 = 1;
+const DECK_PLAYING: u8 = 2;
+const DECK_PAUSED: u8 = 3;
+
 struct Deck {
     player: Arc<Player>,
     transition: Arc<RwLock<TransitionSignal>>,
     cue: Cue,
+    state: Arc<AtomicU8>,
 }
 
 impl Deck {
     fn spawn_event_forwarder(
         deck_idx: usize,
+        deck_state: Arc<AtomicU8>,
         mut rx: PlayerEventChannel,
         active_deck: Arc<RwLock<usize>>,
         events_tx: UnboundedSender<PlayerEvent>,
     ) {
         std::thread::spawn(move || {
             while let Some(event) = rx.blocking_recv() {
+                match &event {
+                    PlayerEvent::Loading { .. } => deck_state.store(DECK_LOADING, Ordering::SeqCst),
+                    PlayerEvent::Playing { .. } => deck_state.store(DECK_PLAYING, Ordering::SeqCst),
+                    PlayerEvent::Paused { .. } => deck_state.store(DECK_PAUSED, Ordering::SeqCst),
+                    PlayerEvent::Stopped { .. }
+                    | PlayerEvent::EndOfTrack { .. }
+                    | PlayerEvent::Unavailable { .. } => {
+                        deck_state.store(DECK_STOPPED, Ordering::SeqCst);
+                    }
+                    _ => {}
+                }
                 let is_active = active_deck.read().ok().map_or(false, |d| *d == deck_idx);
                 if is_active && events_tx.send(event).is_err() {
                     break;
@@ -228,18 +247,23 @@ impl Engine {
         let rx_a = player_a.get_player_event_channel();
         let rx_b = player_b.get_player_event_channel();
 
-        Deck::spawn_event_forwarder(0, rx_a, active_deck.clone(), events_tx.clone());
-        Deck::spawn_event_forwarder(1, rx_b, active_deck.clone(), events_tx);
+        let state_a = Arc::new(AtomicU8::new(DECK_STOPPED));
+        let state_b = Arc::new(AtomicU8::new(DECK_STOPPED));
+
+        Deck::spawn_event_forwarder(0, state_a.clone(), rx_a, active_deck.clone(), events_tx.clone());
+        Deck::spawn_event_forwarder(1, state_b.clone(), rx_b, active_deck.clone(), events_tx);
 
         let deck_a = Deck {
             player: player_a,
             transition: transition_a,
             cue: cue_a.clone(),
+            state: state_a,
         };
         let deck_b = Deck {
             player: player_b,
             transition: transition_b,
             cue: cue_b.clone(),
+            state: state_b,
         };
 
         let events = Events {
@@ -318,14 +342,17 @@ impl Engine {
 
             self.sync.bump_deck(incoming_idx);
             let outgoing_epoch = self.sync.deck_epoch(current_idx);
+            self.deck(incoming_idx).state.store(DECK_LOADING, Ordering::SeqCst);
             self.deck(incoming_idx).player.load(uri, true, 0);
 
             let outgoing_player = self.deck(current_idx).player.clone();
+            let outgoing_state = self.deck(current_idx).state.clone();
             let sync = self.sync.clone();
             let wait_dur = Duration::from_secs_f32(outro_secs + 1.2);
             std::thread::spawn(move || {
                 std::thread::sleep(wait_dur);
                 if sync.deck_epoch(current_idx) == outgoing_epoch {
+                    outgoing_state.store(DECK_STOPPED, Ordering::SeqCst);
                     outgoing_player.stop();
                 }
             });
@@ -337,6 +364,7 @@ impl Engine {
         let other_idx = 1 - active_idx;
         self.sync.bump_deck(active_idx);
         self.sync.bump_deck(other_idx);
+        self.deck(other_idx).state.store(DECK_STOPPED, Ordering::SeqCst);
         self.deck(other_idx).player.stop();
 
         if !seamless || !self.gapless {
@@ -351,6 +379,7 @@ impl Engine {
         if let Ok(mut active) = self.active_id.write() {
             *active = Some(track_id.to_owned());
         }
+        self.deck(active_idx).state.store(DECK_LOADING, Ordering::SeqCst);
         self.deck(active_idx)
             .player
             .load(uri, true, at.as_millis() as u32);
@@ -363,6 +392,7 @@ impl Engine {
         let other_idx = 1 - active_idx;
         self.sync.bump_deck(active_idx);
         self.sync.bump_deck(other_idx);
+        self.deck(other_idx).state.store(DECK_STOPPED, Ordering::SeqCst);
         self.deck(other_idx).player.stop();
 
         self.deck(active_idx).cue.clear();
@@ -375,6 +405,7 @@ impl Engine {
         if let Ok(mut active) = self.active_id.write() {
             *active = Some(track_id.to_owned());
         }
+        self.deck(active_idx).state.store(DECK_LOADING, Ordering::SeqCst);
         self.deck(active_idx)
             .player
             .load(uri, false, at.as_millis() as u32);
@@ -392,7 +423,8 @@ impl Engine {
     fn play(&self) {
         let active = self.active_deck.read().ok().map_or(0, |deck| *deck);
         let deck = self.deck(active);
-        if deck.cue.cleared() {
+        let state = deck.state.load(Ordering::SeqCst);
+        if state == DECK_STOPPED || state == DECK_PLAYING || deck.cue.cleared() {
             return;
         }
         deck.player.play();
@@ -400,13 +432,19 @@ impl Engine {
 
     fn pause(&self) {
         let active = self.active_deck.read().ok().map_or(0, |deck| *deck);
-        self.deck(active).player.pause();
+        let deck = self.deck(active);
+        let state = deck.state.load(Ordering::SeqCst);
+        if state == DECK_STOPPED || state == DECK_PAUSED {
+            return;
+        }
+        deck.player.pause();
     }
 
     fn seek(&self, position: Duration) {
         let active_idx = *self.active_deck.read().unwrap();
         let other_idx = 1 - active_idx;
         self.sync.bump_deck(other_idx);
+        self.deck(other_idx).state.store(DECK_STOPPED, Ordering::SeqCst);
         self.deck(other_idx).player.stop();
         if let Ok(mut ctrl) = self.deck(active_idx).transition.write() {
             ctrl.intro_trigger = ctrl.intro_trigger.wrapping_add(1);

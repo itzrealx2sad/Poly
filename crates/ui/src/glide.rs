@@ -95,7 +95,9 @@ impl Glide {
     }
 
     pub fn sync(&self, scroll: &impl ScrollPosition) {
-        let mut drift = self.drift.borrow_mut();
+        let Ok(mut drift) = self.drift.try_borrow_mut() else {
+            return;
+        };
         if !drift.gliding {
             drift.shown = scroll.offset();
             drift.velocity = Point::default();
@@ -104,7 +106,9 @@ impl Glide {
 
     pub fn nudge(&self, scroll: &impl ScrollPosition, window: &mut Window) {
         {
-            let mut drift = self.drift.borrow_mut();
+            let Ok(mut drift) = self.drift.try_borrow_mut() else {
+                return;
+            };
             let landed = scroll.offset();
             let step = landed - drift.shown;
             let from = match drift.gliding {
@@ -124,7 +128,9 @@ impl Glide {
 
     pub fn aim(&self, scroll: &impl ScrollPosition, to: Point<Pixels>, window: &mut Window) {
         {
-            let mut drift = self.drift.borrow_mut();
+            let Ok(mut drift) = self.drift.try_borrow_mut() else {
+                return;
+            };
             if !drift.gliding {
                 drift.shown = scroll.offset();
             }
@@ -142,7 +148,9 @@ impl Glide {
 
     pub fn jump(&self, scroll: &impl ScrollPosition, to: Point<Pixels>) {
         let landed = {
-            let mut drift = self.drift.borrow_mut();
+            let Ok(mut drift) = self.drift.try_borrow_mut() else {
+                return;
+            };
             drift.target = held(to, scroll);
             drift.shown = drift.target;
             drift.gliding = false;
@@ -156,7 +164,9 @@ impl Glide {
     }
 
     pub fn stop_spring(&self, scroll: &impl ScrollPosition) -> bool {
-        let mut drift = self.drift.borrow_mut();
+        let Ok(mut drift) = self.drift.try_borrow_mut() else {
+            return false;
+        };
         if !drift.springing {
             return false;
         }
@@ -171,7 +181,9 @@ impl Glide {
     }
 
     pub fn goal(&self, scroll: &impl ScrollPosition) -> Point<Pixels> {
-        let drift = self.drift.borrow();
+        let Ok(drift) = self.drift.try_borrow() else {
+            return scroll.offset();
+        };
 
         match drift.gliding {
             true => drift.target,
@@ -180,7 +192,9 @@ impl Glide {
     }
 
     pub fn presentation(&self, scroll: &impl ScrollPosition) -> Point<Pixels> {
-        let drift = self.drift.borrow();
+        let Ok(drift) = self.drift.try_borrow() else {
+            return Point::default();
+        };
 
         match drift.gliding && drift.springing {
             true => drift.shown - scroll.offset(),
@@ -190,7 +204,9 @@ impl Glide {
 
     fn schedule_frame(&self, scroll: &impl ScrollPosition, window: &mut Window) {
         {
-            let mut drift = self.drift.borrow_mut();
+            let Ok(mut drift) = self.drift.try_borrow_mut() else {
+                return;
+            };
             if drift.armed {
                 return;
             }
@@ -204,7 +220,9 @@ impl Glide {
 
     fn step(&self, scroll: &impl ScrollPosition, window: &mut Window, cx: &mut App) {
         let landed = {
-            let mut drift = self.drift.borrow_mut();
+            let Ok(mut drift) = self.drift.try_borrow_mut() else {
+                return;
+            };
             drift.armed = false;
             if !drift.gliding {
                 return;

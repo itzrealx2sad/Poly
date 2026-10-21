@@ -434,11 +434,12 @@ extern "system" fn window_proc(
 ) -> LRESULT {
     match message {
         WM_SIZE => {
-            CONTROLLERS.with(|controllers| {
-                if let Some(controller) = controllers.borrow().get(&key(hwnd)) {
-                    resize(controller.clone(), hwnd);
-                }
+            let controller = CONTROLLERS.with(|controllers| {
+                controllers.borrow().get(&key(hwnd)).cloned()
             });
+            if let Some(controller) = controller {
+                resize(controller, hwnd);
+            }
             LRESULT(0)
         }
         WM_GETMINMAXINFO => {
@@ -453,7 +454,9 @@ extern "system" fn window_proc(
         }
         WM_NCDESTROY => {
             CONTROLLERS.with(|controllers| {
-                controllers.borrow_mut().remove(&key(hwnd));
+                if let Ok(mut map) = controllers.try_borrow_mut() {
+                    map.remove(&key(hwnd));
+                }
             });
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
