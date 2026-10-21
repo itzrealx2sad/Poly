@@ -5,6 +5,7 @@ use anyhow::Result;
 use gpui::{Context, Entity, Task};
 use music::{Album, ArtistRef, Playlist, Track};
 
+use crate::sheets::Sheets;
 use crate::{Io, Library, Network, Session, SessionEvent, Shelf, join};
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
@@ -129,9 +130,12 @@ pub struct Search {
     error: Option<String>,
     session: Entity<Session>,
     library: Entity<Library>,
+    sheets: Sheets,
+    lyric_matches: Vec<Track>,
     io: Io,
     task: Option<Task<()>>,
     faces: Option<Task<()>>,
+    lyric_task: Option<Task<()>>,
 }
 
 impl Search {
@@ -167,9 +171,12 @@ impl Search {
             error: None,
             session,
             library,
+            sheets: Sheets::new(storage::Cache::standard()),
+            lyric_matches: Vec::new(),
             io,
             task: None,
             faces: None,
+            lyric_task: None,
         }
     }
 
@@ -200,6 +207,8 @@ impl Search {
     fn forget_results(&mut self) {
         self.task = None;
         self.faces = None;
+        self.lyric_task = None;
+        self.lyric_matches.clear();
         self.query.clear();
         self.served = None;
         self.catalog.clear();
@@ -220,6 +229,8 @@ impl Search {
 
         if query.is_empty() {
             self.task = None;
+            self.lyric_task = None;
+            self.lyric_matches.clear();
             self.catalog.clear();
             self.served = Some(String::new());
             self.loading = false;
@@ -228,6 +239,23 @@ impl Search {
         }
 
         self.rank(cx);
+
+        let sheets = self.sheets.clone();
+        let asked = query.clone();
+        self.lyric_task = Some(cx.spawn(async move |this, cx| {
+            let matches = cx
+                .background_executor()
+                .spawn(async move { sheets.find_matching_lyrics(&asked, 10) })
+                .await;
+            this.update(cx, |this, cx| {
+                if this.query != asked {
+                    return;
+                }
+                this.lyric_matches = matches.into_iter().map(|(_, track, _)| track).collect();
+                this.rank(cx);
+            })
+            .ok();
+        }));
 
         let Some(client) = self.session.read(cx).client() else {
             self.loading = false;
@@ -347,6 +375,7 @@ impl Search {
                 state.playlists(),
                 &self.catalog,
                 &self.portraits,
+                &self.lyric_matches,
                 query,
             )
         };
@@ -361,6 +390,7 @@ fn rank(
     playlists: &[Playlist],
     catalog: &Catalog,
     portraits: &HashMap<String, String>,
+    lyric_matches: &[Track],
     asked: &str,
 ) -> Vec<Hit> {
     let query = Query::new(asked);
@@ -368,7 +398,7 @@ fn rank(
         return Vec::new();
     }
 
-    let mut all = songs(library, &catalog.tracks, &query);
+    let mut all = songs(library, &catalog.tracks, lyric_matches, &query);
     all.extend(artists(library, &catalog.tracks, albums, portraits, &query));
     all.extend(albums_of(albums, library, catalog, &query));
     all.extend(playlists_of(playlists, &catalog.playlists, &query));
@@ -377,7 +407,12 @@ fn rank(
     all.into_iter().map(|scored| scored.hit).collect()
 }
 
-fn songs(library: &[Track], catalog: &[Track], query: &Query) -> Vec<Scored> {
+fn songs(
+    library: &[Track],
+    catalog: &[Track],
+    lyric_matches: &[Track],
+    query: &Query,
+) -> Vec<Scored> {
     let mut scored: Vec<Scored> = Vec::new();
 
     for (track, rank) in sources(library, catalog) {
@@ -399,6 +434,20 @@ fn songs(library: &[Track], catalog: &[Track], query: &Query) -> Vec<Scored> {
             popularity: track.popularity,
             hit: Hit::Song(track.clone()),
         });
+    }
+
+    for track in lyric_matches {
+        let already = scored.iter().any(|s| match &s.hit {
+            Hit::Song(t) => t.id.is_some() && t.id == track.id,
+            _ => false,
+        });
+        if !already {
+            scored.push(Scored {
+                score: TAIL,
+                popularity: track.popularity,
+                hit: Hit::Song(track.clone()),
+            });
+        }
     }
 
     capped(scored)
@@ -704,7 +753,7 @@ mod tests {
             ..Catalog::default()
         };
 
-        super::rank(library, albums, &[], &catalog, &HashMap::new(), asked)
+        super::rank(library, albums, &[], &catalog, &HashMap::new(), &[], asked)
     }
 
     fn track(name: &str, artists: &str, album: &str) -> Track {

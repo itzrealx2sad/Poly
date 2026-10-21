@@ -144,8 +144,31 @@ impl Cache {
             .context("cannot trim cached lyrics")?;
         transaction.commit().context("cannot save cached lyrics")
     }
-    /// A connection with every cache table in place. The local scan index reaches for this
-    /// directly, the way local playlists do with [`crate::Database`].
+    pub fn search_lyrics(
+        &self,
+        version: u32,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String)>> {
+        let connection = self.open()?;
+        let pattern = format!("%{query}%");
+        let mut statement = connection
+            .prepare(
+                "SELECT key, value FROM lyrics WHERE version = ? AND value LIKE ? ORDER BY stored DESC LIMIT ?",
+            )
+            .context("cannot prepare search lyrics query")?;
+        let rows = statement
+            .query_map(params![version, pattern, limit as i64], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })
+            .context("cannot query lyrics")?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
     pub fn open(&self) -> Result<rusqlite::Connection> {
         crate::connect(&self.path, SCHEMA, &self.ready, "the cache")
     }

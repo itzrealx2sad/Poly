@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use music::{Lyrics as Sheet, LyricsHit};
+use music::{ArtistRef, Lyrics as Sheet, LyricsHit, Track};
 use serde::{Deserialize, Serialize};
 
 const VERSION: u32 = 4;
@@ -126,6 +126,67 @@ impl Sheets {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => log::warn!("lyrics: cannot remove {}: {error}", path.display()),
         }
+    }
+
+    pub(crate) fn find_matching_lyrics(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Vec<(String, Track, String)> {
+        let needle = query.trim().to_lowercase();
+        if needle.len() < 2 {
+            return Vec::new();
+        }
+        let Ok(rows) = self.cache.search_lyrics(VERSION, &needle, limit * 2) else {
+            return Vec::new();
+        };
+        let mut results = Vec::new();
+        for (key, value) in rows {
+            let Ok(kept) = serde_json::from_str::<Kept>(&value) else {
+                continue;
+            };
+            for held in kept.hits {
+                let matched_line = match &held.lyrics {
+                    Sheet::Plain { text, .. } => text
+                        .lines()
+                        .find(|line| line.to_lowercase().contains(&needle))
+                        .map(|line| line.trim().to_owned()),
+                    Sheet::Synced { lines } => lines
+                        .iter()
+                        .find(|line| line.text.to_lowercase().contains(&needle))
+                        .map(|line| line.text.trim().to_owned()),
+                };
+                if let Some(snippet) = matched_line {
+                    let track_id = match key.strip_suffix(":lyrics") {
+                        Some(rest) => match rest.split_once(':') {
+                            Some((_, id)) => id.to_owned(),
+                            None => rest.to_owned(),
+                        },
+                        None => key.clone(),
+                    };
+                    let artist_name = held.artist.clone();
+                    let track = Track {
+                        id: Some(track_id.clone()),
+                        name: held.title,
+                        artists: artist_name.clone(),
+                        artist_refs: vec![ArtistRef {
+                            name: artist_name,
+                            id: None,
+                        }],
+                        album: held.album.unwrap_or_default(),
+                        duration: held.duration.unwrap_or_default(),
+                        tags: vec![format!("lyrics:{snippet}")],
+                        ..Track::default()
+                    };
+                    results.push((track_id, track, snippet));
+                    break;
+                }
+            }
+            if results.len() >= limit {
+                break;
+            }
+        }
+        results
     }
 
     fn keep(&self, entries: impl IntoIterator<Item = (String, Kept)>) -> anyhow::Result<()> {

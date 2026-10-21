@@ -410,6 +410,7 @@ kind-song = Song
 kind-artist = Artist
 kind-album = Album
 kind-playlist = Playlist
+kind-lyrics = Lyrics
 
 # song page
 song-eyebrow = Song

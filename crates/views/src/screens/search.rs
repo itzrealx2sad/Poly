@@ -349,6 +349,39 @@ impl SearchView {
     }
 
     fn subtitle(&self, hit: &Hit, place: usize, compact: bool, theme: &Theme) -> AnyElement {
+        if let Hit::Song(track) = hit
+            && let Some(snippet) = track.tags.iter().find_map(|t| t.strip_prefix("lyrics:"))
+        {
+            let snippet = format!("“{}”", snippet.trim());
+            return div()
+                .flex()
+                .min_w_0()
+                .gap_1()
+                .items_center()
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(theme.text(Text::Small))
+                        .text_color(theme.primary)
+                        .child(t!("kind-lyrics")),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(theme.text(Text::Small))
+                        .text_color(theme.muted_foreground)
+                        .child("·"),
+                )
+                .child(
+                    div()
+                        .text_size(theme.text(Text::Small))
+                        .text_color(theme.muted_foreground)
+                        .truncate()
+                        .child(SharedString::from(snippet)),
+                )
+                .into_any_element();
+        }
+
         if let (Hit::Album(album), false) = (hit, compact) {
             return cards::released(
                 format!("album-artist-{place}"),
@@ -928,7 +961,10 @@ fn cover(hit: &Hit) -> Option<String> {
 
 fn meta(hit: &Hit, compact: bool) -> SharedString {
     match hit {
-        Hit::Song(track) => SharedString::from(track.artists.clone()),
+        Hit::Song(track) => match track.tags.iter().find_map(|t| t.strip_prefix("lyrics:")) {
+            Some(snippet) => SharedString::from(format!("{} · “{}”", t!("kind-lyrics"), snippet.trim())),
+            None => SharedString::from(track.artists.clone()),
+        },
         Hit::Album(album) => SharedString::from(album.artists.clone()),
         Hit::Artist(artist) => match compact {
             true => noun(Kind::Artist),
