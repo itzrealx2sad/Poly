@@ -14,9 +14,9 @@ use crate::{
 };
 
 const SOURCE: &str = "Kugou";
-const SEARCH: &str = "https://mobiles.kugou.com/api/v3/search/song";
-const CANDIDATES: &str = "https://lyrics.kugou.com/search";
-const DOWNLOAD: &str = "https://lyrics.kugou.com/download";
+const SEARCH: &str = "http://mobilecdn.kugou.com/api/v3/search/song";
+const CANDIDATES: &str = "http://lyrics.kugou.com/search";
+const DOWNLOAD: &str = "http://lyrics.kugou.com/download";
 const SONGS: usize = 4;
 const PAGE: usize = 20;
 const SHEETS: usize = 2;
