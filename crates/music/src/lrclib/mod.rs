@@ -14,6 +14,9 @@ const AGENT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     " (https://github.com/sonorahq/sonora)"
 );
+const RETRIES: u32 = 2;
+const RETRY_WAIT: Duration = Duration::from_millis(350);
+const RETRY_CAP: Duration = Duration::from_secs(3);
 
 pub struct LrcLib {
     http: reqwest::Client,
@@ -80,27 +83,54 @@ impl LyricsProvider for LrcLib {
     }
 
     async fn search(&self, query: &LyricsQuery) -> Result<Vec<LyricsHit>> {
-        let response = self
-            .http
-            .get(ENDPOINT)
-            .query(&[
-                ("track_name", query.title.as_str()),
-                ("artist_name", query.artist.as_str()),
-            ])
-            .header("User-Agent", AGENT)
-            .send()
-            .await
-            .context("cannot reach lrclib")?;
-        let status = response.status();
-        if !status.is_success() {
-            anyhow::bail!("lrclib answered with status {status}");
+        for attempt in 0..=RETRIES {
+            let response = self
+                .http
+                .get(ENDPOINT)
+                .query(&[
+                    ("track_name", query.title.as_str()),
+                    ("artist_name", query.artist.as_str()),
+                ])
+                .header("User-Agent", AGENT)
+                .send()
+                .await
+                .context("cannot reach lrclib")?;
+            let status = response.status();
+            if status.is_success() {
+                let found: Vec<Found> = response
+                    .json()
+                    .await
+                    .context("cannot read the lrclib response")?;
+                return Ok(found.into_iter().filter_map(hit).collect());
+            }
+            if !transient(status) || attempt == RETRIES {
+                anyhow::bail!("lrclib answered with status {status}");
+            }
+            let wait = retry_after(response.headers())
+                .unwrap_or(RETRY_WAIT * 2u32.pow(attempt))
+                .min(RETRY_CAP);
+            log::debug!(
+                "lyrics: lrclib answered {status}, retrying in {} ms",
+                wait.as_millis()
+            );
+            tokio::time::sleep(wait).await;
         }
-        let found: Vec<Found> = response
-            .json()
-            .await
-            .context("cannot read the lrclib response")?;
-        Ok(found.into_iter().filter_map(hit).collect())
+        unreachable!("the lrclib retry loop always returns")
     }
+}
+
+fn transient(status: reqwest::StatusCode) -> bool {
+    status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+}
+
+fn retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    let seconds = headers
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()?;
+    Some(Duration::from_secs(seconds))
 }
 
 fn hit(found: Found) -> Option<LyricsHit> {

@@ -7,9 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
+### Fixed
 
-- AutoMix now adapts its spectral handoff to incoming beat accents, outro energy, and the relative loudness of both tracks, producing more musical transitions while retaining a safe fallback when the audio does not provide enough signal.
+- Spotify resume and pause no longer send transport commands to the inactive stopped deck.
+- LrcLib transient service outages are retried without preventing other lyric providers from answering.
 
 ## [0.43.0] - 2026-10-13
 

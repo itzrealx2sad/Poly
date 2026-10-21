@@ -384,13 +384,13 @@ impl Engine {
     }
 
     fn play(&self) {
-        self.deck_a.player.play();
-        self.deck_b.player.play();
+        let active = self.active_deck.read().ok().map_or(0, |deck| *deck);
+        self.deck(active).player.play();
     }
 
     fn pause(&self) {
-        self.deck_a.player.pause();
-        self.deck_b.player.pause();
+        let active = self.active_deck.read().ok().map_or(0, |deck| *deck);
+        self.deck(active).player.pause();
     }
 
     fn seek(&self, position: Duration) {

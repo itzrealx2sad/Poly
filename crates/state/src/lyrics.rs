@@ -739,7 +739,12 @@ async fn gather(
             let mut found = provider
                 .search(&query)
                 .await
-                .inspect_err(|error| log::warn!("lyrics: {name} did not answer: {error:#}"))
+                .inspect_err(|error| match provider.name() == "LrcLib"
+                    && error.to_string().contains("lrclib answered with status")
+                {
+                    true => log::debug!("lyrics: {name} temporarily unavailable: {error:#}"),
+                    false => log::warn!("lyrics: {name} did not answer: {error:#}"),
+                })
                 .ok()?;
             // Hits for another track are dropped here, before the lookup holds and copies them.
             found.retain(|hit| music::lyrics::matched(&query, hit));
