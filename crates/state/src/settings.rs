@@ -341,6 +341,8 @@ struct Values {
     apple_quality: String,
     apple_spatial_audio: bool,
     youtube_quality: String,
+    #[serde(default)]
+    youtube_premium: bool,
     appearance: Appearance,
 }
 
@@ -506,7 +508,8 @@ impl Default for Values {
             spotify_quality: "high".to_owned(),
             apple_quality: "high".to_owned(),
             apple_spatial_audio: false,
-            youtube_quality: "high".to_owned(),
+            youtube_quality: "auto".to_owned(),
+            youtube_premium: false,
             appearance: Appearance::default(),
         }
     }
@@ -804,7 +807,12 @@ impl AppSettings {
     }
 
     pub fn streaming_quality(&self) -> &str {
-        if self.values.apple_quality == "lossless" || self.values.spotify_quality == "lossless" {
+        if self.values.spotify_quality == "auto"
+            || self.values.apple_quality == "auto"
+            || self.values.youtube_quality == "auto"
+        {
+            "auto"
+        } else if self.values.apple_quality == "lossless" || self.values.spotify_quality == "lossless" {
             "lossless"
         } else if self.values.spotify_quality == "low" || self.values.apple_quality == "low" {
             "low"
@@ -828,7 +836,15 @@ impl AppSettings {
     }
 
     pub fn youtube_quality(&self) -> &str {
-        &self.values.youtube_quality
+        if !self.values.youtube_premium {
+            "auto"
+        } else {
+            &self.values.youtube_quality
+        }
+    }
+
+    pub fn youtube_premium(&self) -> bool {
+        self.values.youtube_premium
     }
 
     pub fn equalizer(&self) -> bool {
@@ -1283,6 +1299,7 @@ impl AppSettings {
 
     pub fn set_streaming_quality(&mut self, quality: String, cx: &mut Context<Self>) {
         let (spot, apple, yt) = match quality.as_str() {
+            "auto" => ("auto", "auto", "auto"),
             "low" => ("low", "low", "low"),
             "medium" => ("medium", "medium", "medium"),
             "lossless" => ("high", "lossless", "high"),
@@ -1298,6 +1315,14 @@ impl AppSettings {
             return;
         }
         self.values.youtube_quality = quality;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_youtube_premium(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.values.youtube_premium == enabled {
+            return;
+        }
+        self.values.youtube_premium = enabled;
         self.schedule_save(cx);
     }
 

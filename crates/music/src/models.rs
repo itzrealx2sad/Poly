@@ -585,6 +585,7 @@ pub enum PinOutcome {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum StreamQuality {
+    Auto,
     Low,
     Medium,
     #[default]
@@ -593,10 +594,11 @@ pub enum StreamQuality {
 }
 
 impl StreamQuality {
-    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Lossless];
+    pub const ALL: [Self; 5] = [Self::Auto, Self::Low, Self::Medium, Self::High, Self::Lossless];
 
     pub fn id(self) -> &'static str {
         match self {
+            Self::Auto => "auto",
             Self::Low => "low",
             Self::Medium => "medium",
             Self::High => "high",
@@ -606,6 +608,7 @@ impl StreamQuality {
 
     pub fn label(self) -> &'static str {
         match self {
+            Self::Auto => "Auto",
             Self::Low => "Low",
             Self::Medium => "Normal",
             Self::High => "High",
@@ -615,6 +618,7 @@ impl StreamQuality {
 
     pub fn from_id(id: &str) -> Self {
         match id {
+            "auto" => Self::Auto,
             "low" => Self::Low,
             "medium" => Self::Medium,
             "lossless" => Self::Lossless,

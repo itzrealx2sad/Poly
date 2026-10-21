@@ -37,7 +37,7 @@ const BLOBS: usize = 5;
 /// anything wider drops to a quarter. The field is already drawn at `DOWNSCALE`, so a wider
 /// blur would shrink it a second time and the upscale would crawl over every seam. The discs
 /// carry the falloff instead.
-const BLUR_FULL: f32 = 4.;
+const BLUR_FULL: f32 = 8.;
 /// How many times smaller the field is drawn than it is shown. The layer is
 /// laid out at this fraction of the window and the compositor scales it back
 /// up with a bilinear sample, so the discs and the blur cost a sixteenth of
@@ -50,29 +50,16 @@ const DOWNSCALE: f32 = 4.;
 /// black sheet this strong was most of what a see-through window's alpha went on.
 const SHADE: f32 = 0.20;
 
-/// One blob: base centre (fractions of the layer), diameter (fraction of the
-/// layer's smaller side), drift period in seconds, phase, drift amplitude
-/// (fractions).
-///
-/// A centre travels at 2 pi A W / T at its fastest, where A is its amplitude and W the width
-/// it drifts across. On a 2560 wide window these periods put that around 65 pixels a second,
-/// so a frame at the display rate moves a blob half a pixel. What reads as steps at this speed
-/// is not the clock but the eight bit banding underneath, which holds a contour still and then
-/// jumps it a whole band at once. The dither over the field is what deals with that.
-const SPECS: [(f32, f32, f32, f32, f32, f32, f32); BLOBS] = [
-    (0.22, 0.30, 1.10, 34., 0.0, 0.13, 0.10),
-    (0.80, 0.24, 1.00, 27., 1.7, 0.11, 0.13),
-    (0.52, 0.68, 1.20, 41., 3.4, 0.14, 0.09),
-    (0.12, 0.78, 0.90, 24., 5.1, 0.10, 0.12),
-    (0.85, 0.72, 0.72, 31., 2.5, 0.12, 0.11),
+const GRID_SIZE: usize = 6;
+const GRID_MAP: [[usize; GRID_SIZE]; GRID_SIZE] = [
+    [0, 1, 3, 2, 0, 4],
+    [2, 4, 0, 1, 3, 1],
+    [1, 0, 2, 4, 1, 0],
+    [3, 2, 1, 0, 4, 2],
+    [0, 4, 3, 2, 0, 1],
+    [4, 1, 0, 3, 2, 4],
 ];
 
-const DISCS: usize = 4;
-/// Opacity ramp from the outermost disc to the core.
-const DISC_FAINT: f32 = 0.08;
-const DISC_STRONG: f32 = 0.24;
-/// Time constant of the exponential ease onto a new palette, in seconds. The
-/// field lands within a few percent of the target after about three of these.
 const WASH: f32 = 0.8;
 
 pub(crate) struct Ambient {
@@ -350,35 +337,31 @@ impl Render for Ambient {
                             .layer_scale(DOWNSCALE)
                             .layer_scale_origin(point(0., 0.))
                             .blur(px(BLUR_FULL / window.scale_factor()))
-                            .children(SPECS.iter().enumerate().map(|(index, spec)| {
-                                let (base_x, base_y, size, period, phase, amp_x, amp_y) = *spec;
-                                let spin = TAU * elapsed / period;
-                                let x = base_x + amp_x * (spin + phase).sin();
-                                let y = base_y + amp_y * (spin * 0.83 + phase * 1.7).cos();
-                                let grown = wide.min(high)
-                                    * size
-                                    * (1. + 0.12 * (spin * 0.6 + phase * 2.3).sin());
-                                let color = colors[index];
-                                div()
-                                    .absolute()
-                                    .left(px(x * wide - grown / 2.))
-                                    .top(px(y * high - grown / 2.))
-                                    .size(px(grown))
-                                    .children((0..DISCS).map(move |step| {
-                                        let fraction = 1.
-                                            - step as f32 / DISCS as f32 * (1. - 1. / DISCS as f32);
-                                        let opacity = DISC_FAINT
-                                            + step as f32 / (DISCS as f32 - 1.)
-                                                * (DISC_STRONG - DISC_FAINT);
-                                        let stepped = grown * fraction;
-                                        div()
-                                            .absolute()
-                                            .left(px((grown - stepped) / 2.))
-                                            .top(px((grown - stepped) / 2.))
-                                            .size(px(stepped))
-                                            .rounded_full()
-                                            .bg(shaded(color).opacity(opacity))
-                                    }))
+                            .children((0..GRID_SIZE).flat_map(|row| {
+                                let colors = colors;
+                                (0..GRID_SIZE).map(move |col| {
+                                    let cell_w = wide / GRID_SIZE as f32;
+                                    let cell_h = high / GRID_SIZE as f32;
+                                    let primary_idx = GRID_MAP[row][col];
+                                    let secondary_idx = (primary_idx + 1 + (row + col) % 3) % BLOBS;
+                                    let color = match animates {
+                                        true => {
+                                            let period = 18. + ((row * 7 + col * 11) % 15) as f32;
+                                            let phase = row as f32 * 1.3 + col as f32 * 1.7;
+                                            let spin = TAU * elapsed / period;
+                                            let t = 0.5 + 0.5 * (spin + phase).sin();
+                                            blend(colors[primary_idx], colors[secondary_idx], t * 0.45)
+                                        }
+                                        false => colors[primary_idx],
+                                    };
+                                    div()
+                                        .absolute()
+                                        .left(px(col as f32 * cell_w))
+                                        .top(px(row as f32 * cell_h))
+                                        .w(px(cell_w + 1.5))
+                                        .h(px(cell_h + 1.5))
+                                        .bg(shaded(color))
+                                })
                             })),
                     ),
             )

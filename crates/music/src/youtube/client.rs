@@ -19,6 +19,7 @@ const EPISODES: &str = "SE";
 pub struct YouTubeClient {
     api: Arc<YtMusic>,
     account: String,
+    store: Arc<crate::local::Store>,
 }
 
 impl YouTubeClient {
@@ -26,12 +27,17 @@ impl YouTubeClient {
         Self {
             api,
             account: String::new(),
+            store: Arc::new(crate::local::Store::new(storage::Database::standard())),
         }
     }
 
     pub fn owned_by(mut self, account: impl Into<String>) -> Self {
         self.account = account.into();
         self
+    }
+
+    fn is_guest(&self) -> bool {
+        self.account.is_empty()
     }
 
     async fn hydrate_durations(&self, tracks: &mut [ytmusic::Track]) {
@@ -115,18 +121,45 @@ impl MusicApi for YouTubeClient {
     }
 
     async fn saved_tracks(&self) -> Result<Vec<Track>> {
-        Ok(self
-            .api
-            .liked_songs_resolved()
-            .await?
-            .into_iter()
-            .enumerate()
-            .map(|(index, track)| wire::track(track, index as u32))
-            .collect())
+        if self.is_guest() {
+            let starred = self.store.starred(crate::local::Starred::Tracks)?;
+            let mut tracks = Vec::new();
+            for (idx, (tid, _)) in starred.iter().enumerate() {
+                if let Ok(mut trk) = self.track(tid).await {
+                    trk.track_number = idx as u32 + 1;
+                    tracks.push(trk);
+                }
+            }
+            return Ok(tracks);
+        }
+        match self.api.liked_songs_resolved().await {
+            Ok(songs) => Ok(songs
+                .into_iter()
+                .enumerate()
+                .map(|(index, track)| wire::track(track, index as u32))
+                .collect()),
+            Err(_) => {
+                let starred = self.store.starred(crate::local::Starred::Tracks)?;
+                let mut tracks = Vec::new();
+                for (idx, (tid, _)) in starred.iter().enumerate() {
+                    if let Ok(mut trk) = self.track(tid).await {
+                        trk.track_number = idx as u32 + 1;
+                        tracks.push(trk);
+                    }
+                }
+                Ok(tracks)
+            }
+        }
     }
 
     async fn set_track_saved(&self, track_id: &str, saved: bool) -> Result<()> {
-        self.api.rate_track(track_id, saved).await
+        if self.is_guest() {
+            return self.store.set_starred(crate::local::Starred::Tracks, track_id, saved);
+        }
+        match self.api.rate_track(track_id, saved).await {
+            Ok(()) => Ok(()),
+            Err(_) => self.store.set_starred(crate::local::Starred::Tracks, track_id, saved),
+        }
     }
 
     async fn track(&self, track_id: &str) -> Result<Track> {
@@ -189,44 +222,91 @@ impl MusicApi for YouTubeClient {
     }
 
     async fn playlists(&self) -> Result<Vec<Playlist>> {
-        Ok(self
-            .api
-            .library_playlists()
-            .await?
-            .into_iter()
-            .filter_map(|playlist| library_playlist(playlist, &self.account))
-            .collect())
+        let mut list = Vec::new();
+        if !self.is_guest() {
+            if let Ok(playlists) = self.api.library_playlists().await {
+                list.extend(playlists.into_iter().filter_map(|playlist| library_playlist(playlist, &self.account)));
+            }
+        }
+        if let Ok(stored) = self.store.list() {
+            for s in stored {
+                if !list.iter().any(|p| p.id == s.id) {
+                    let count = self.store.tracks(&s.id).map(|t| t.len()).unwrap_or(0);
+                    list.push(Playlist {
+                        id: s.id,
+                        name: s.name,
+                        owner: if self.account.is_empty() { "Guest".to_string() } else { self.account.clone() },
+                        owner_id: String::new(),
+                        owned: true,
+                        collaborative: false,
+                        blend: false,
+                        public: false,
+                        cover: None,
+                        track_count: count as u32,
+                        modified_at: Some(s.modified_at),
+                    });
+                }
+            }
+        }
+        Ok(list)
     }
 
     async fn create_playlist(&self, name: &str) -> Result<String> {
-        self.api.create_playlist(name).await
+        if self.is_guest() {
+            return self.store.create(name);
+        }
+        match self.api.create_playlist(name).await {
+            Ok(id) => Ok(id),
+            Err(_) => self.store.create(name),
+        }
     }
 
     async fn rename_playlist(&self, playlist_id: &str, name: &str) -> Result<()> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            return self.store.rename(playlist_id, name);
+        }
         self.api.rename_playlist(playlist_id, name).await
     }
 
     async fn delete_playlist(&self, playlist_id: &str) -> Result<()> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            return self.store.delete(playlist_id);
+        }
         self.api.delete_playlist(playlist_id).await
     }
 
     async fn remove_playlist_from_library(&self, playlist_id: &str) -> Result<()> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            return self.store.delete(playlist_id);
+        }
         self.api.rate_playlist(playlist_id, false).await
     }
 
     async fn add_playlist_to_library(&self, playlist_id: &str) -> Result<()> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            return Ok(());
+        }
         self.api.rate_playlist(playlist_id, true).await
     }
 
     async fn set_playlist_public(&self, playlist_id: &str, public: bool) -> Result<()> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            return Ok(());
+        }
         self.api.set_playlist_privacy(playlist_id, public).await
     }
 
     async fn add_track_to_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            return self.store.add(playlist_id, track_id);
+        }
         self.api.add_playlist_track(playlist_id, track_id).await
     }
 
     async fn remove_track_from_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            return self.store.remove(playlist_id, track_id);
+        }
         let tracks = self.api.playlist(playlist_id).await?.tracks;
         let seat = |list: &[ytmusic::Track]| {
             list.iter()
@@ -249,33 +329,92 @@ impl MusicApi for YouTubeClient {
     }
 
     async fn saved_albums(&self) -> Result<Vec<Album>> {
-        Ok(self
-            .api
-            .library_albums()
-            .await?
-            .into_iter()
-            .map(wire::album)
-            .collect())
+        if self.is_guest() {
+            let starred = self.store.starred(crate::local::Starred::Albums)?;
+            let mut albums = Vec::new();
+            for (aid, _) in starred {
+                if let Ok(detail) = self.album(&aid).await {
+                    albums.push(detail.album);
+                }
+            }
+            return Ok(albums);
+        }
+        match self.api.library_albums().await {
+            Ok(albums) => Ok(albums.into_iter().map(wire::album).collect()),
+            Err(_) => {
+                let starred = self.store.starred(crate::local::Starred::Albums)?;
+                let mut albums = Vec::new();
+                for (aid, _) in starred {
+                    if let Ok(detail) = self.album(&aid).await {
+                        albums.push(detail.album);
+                    }
+                }
+                Ok(albums)
+            }
+        }
     }
 
     async fn set_album_saved(&self, album_id: &str, saved: bool) -> Result<()> {
-        let detail = self.api.album(album_id).await?;
-        let playlist_id = detail
-            .album
-            .playlist_id
-            .context("album has no audio playlist")?;
-        self.api
-            .rate_playlist(&playlist_id, saved)
-            .await
-            .with_context(|| format!("cannot rate the album {album_id} as {playlist_id}"))
+        if self.is_guest() {
+            return self.store.set_starred(crate::local::Starred::Albums, album_id, saved);
+        }
+        let detail = match self.api.album(album_id).await {
+            Ok(detail) => detail,
+            Err(_) => return self.store.set_starred(crate::local::Starred::Albums, album_id, saved),
+        };
+        let Some(playlist_id) = detail.album.playlist_id else {
+            return self.store.set_starred(crate::local::Starred::Albums, album_id, saved);
+        };
+        match self.api.rate_playlist(&playlist_id, saved).await {
+            Ok(()) => Ok(()),
+            Err(_) => self.store.set_starred(crate::local::Starred::Albums, album_id, saved),
+        }
     }
 
     async fn saved_artists(&self) -> Result<Vec<SavedArtist>> {
-        subscriptions::saved(&self.api).await
+        if self.is_guest() {
+            let starred = self.store.starred(crate::local::Starred::Artists)?;
+            let mut artists = Vec::new();
+            for (aid, _) in starred {
+                if let Ok(artist) = self.artist(&aid).await {
+                    artists.push(SavedArtist {
+                        id: aid,
+                        name: artist.name,
+                        cover: artist.cover_large,
+                        added_at: None,
+                    });
+                }
+            }
+            return Ok(artists);
+        }
+        match subscriptions::saved(&self.api).await {
+            Ok(artists) => Ok(artists),
+            Err(_) => {
+                let starred = self.store.starred(crate::local::Starred::Artists)?;
+                let mut artists = Vec::new();
+                for (aid, _) in starred {
+                    if let Ok(artist) = self.artist(&aid).await {
+                        artists.push(SavedArtist {
+                            id: aid,
+                            name: artist.name,
+                            cover: artist.cover_large,
+                            added_at: None,
+                        });
+                    }
+                }
+                Ok(artists)
+            }
+        }
     }
 
     async fn set_artist_saved(&self, artist_id: &str, saved: bool) -> Result<()> {
-        subscriptions::set_saved(&self.api, artist_id, saved).await
+        if self.is_guest() {
+            return self.store.set_starred(crate::local::Starred::Artists, artist_id, saved);
+        }
+        match subscriptions::set_saved(&self.api, artist_id, saved).await {
+            Ok(()) => Ok(()),
+            Err(_) => self.store.set_starred(crate::local::Starred::Artists, artist_id, saved),
+        }
     }
 
     async fn album(&self, album_id: &str) -> Result<AlbumDetail> {
@@ -318,6 +457,35 @@ impl MusicApi for YouTubeClient {
     }
 
     async fn playlist(&self, playlist_id: &str) -> Result<PlaylistDetail> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            let stored = self.store.one(playlist_id)?;
+            let track_ids = self.store.tracks(playlist_id)?;
+            let mut tracks = Vec::new();
+            for (idx, tid) in track_ids.iter().enumerate() {
+                if let Ok(mut trk) = self.track(tid).await {
+                    trk.track_number = idx as u32 + 1;
+                    tracks.push(trk);
+                }
+            }
+            let cover = tracks.first().and_then(|t| t.cover.clone());
+            return Ok(PlaylistDetail {
+                playlist: Playlist {
+                    id: stored.id,
+                    name: stored.name,
+                    owner: if self.account.is_empty() { "Guest".to_string() } else { self.account.clone() },
+                    owner_id: String::new(),
+                    owned: true,
+                    collaborative: false,
+                    blend: false,
+                    public: false,
+                    cover,
+                    track_count: tracks.len() as u32,
+                    modified_at: Some(stored.modified_at),
+                },
+                tracks,
+                continuation: None,
+            });
+        }
         let mut detail = self.api.playlist_page(playlist_id).await?;
         detail.tracks = self.api.swap_playable(detail.tracks).await;
         Ok(wire::playlist_detail(detail))
@@ -333,12 +501,35 @@ impl MusicApi for YouTubeClient {
     }
 
     async fn playlist_tracks(&self, playlist_id: &str) -> Result<Vec<Track>> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            let track_ids = self.store.tracks(playlist_id)?;
+            let mut tracks = Vec::new();
+            for (idx, tid) in track_ids.iter().enumerate() {
+                if let Ok(mut trk) = self.track(tid).await {
+                    trk.track_number = idx as u32 + 1;
+                    tracks.push(trk);
+                }
+            }
+            return Ok(tracks);
+        }
         let mut detail = self.api.playlist(playlist_id).await?;
         detail.tracks = self.api.swap_playable(detail.tracks).await;
         Ok(wire::playlist_detail(detail).tracks)
     }
 
     async fn playlist_covers(&self, playlist_id: &str, wanted: usize) -> Result<Vec<String>> {
+        if playlist_id.starts_with(crate::LOCAL_PLAYLIST_PREFIX) {
+            let track_ids = self.store.tracks(playlist_id)?;
+            let mut covers = Vec::new();
+            for tid in track_ids.iter().take(wanted) {
+                if let Ok(trk) = self.track(tid).await {
+                    if let Some(c) = trk.cover {
+                        covers.push(c);
+                    }
+                }
+            }
+            return Ok(covers);
+        }
         let mut tracks = self.api.playlist_page(playlist_id).await?.tracks;
         tracks = self.api.swap_playable(tracks).await;
         let tracks: Vec<Track> = tracks

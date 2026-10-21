@@ -1923,7 +1923,7 @@ impl Render for Aside {
                     cx.notify();
                 }
             }))
-            .when(self.titled || self.tab == SideTab::Queue, |this| {
+            .when(self.tab == SideTab::Queue, |this| {
                 this.child(self.header(sections, window, cx))
             })
             .child(

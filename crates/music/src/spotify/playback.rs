@@ -198,7 +198,9 @@ impl Engine {
         let bitrate = match config.quality {
             StreamQuality::Low => Bitrate::Bitrate96,
             StreamQuality::Medium => Bitrate::Bitrate160,
-            StreamQuality::High | StreamQuality::Lossless => Bitrate::Bitrate320,
+            StreamQuality::Auto | StreamQuality::High | StreamQuality::Lossless => {
+                Bitrate::Bitrate320
+            }
         };
 
         let player_config = PlayerConfig {

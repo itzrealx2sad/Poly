@@ -695,6 +695,7 @@ pub trait MusicProvider: Send + Sync {
     ) -> Result<ProviderSession>;
     fn abandon(&self) {}
     fn sign_out(&self);
+    fn sign_out_guest(&self) {}
     /// How to run `SignIn::Secret` in a browser window. `None` means the provider has no cookie
     /// sign-in, and the app offers no `Secret` option for it.
     fn web_sign_in(&self) -> Option<WebSignIn> {

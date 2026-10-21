@@ -2400,13 +2400,19 @@ impl Playback {
     }
 
     fn start_engine(&mut self, playback: Arc<dyn PlaybackFactory>, cx: &mut Context<Self>) {
-        let provider = self.session.read(cx).provider_slug();
+        let session = self.session.read(cx);
+        let provider = session.provider_slug();
         let settings = self.settings.read(cx);
-        let (quality_str, spatial_audio) = match provider {
-            Some("spotify") => (settings.spotify_quality(), false),
-            Some("apple") => (settings.apple_quality(), settings.apple_spatial_audio()),
-            Some("youtube") => (settings.youtube_quality(), false),
-            _ => ("high", false),
+        let is_guest = session.guest() || !session.authenticated();
+        let (quality_str, spatial_audio) = if is_guest || provider.is_none() {
+            ("auto", false)
+        } else {
+            match provider {
+                Some("spotify") => (settings.spotify_quality(), false),
+                Some("apple") => (settings.apple_quality(), settings.apple_spatial_audio()),
+                Some("youtube") => (settings.youtube_quality(), false),
+                _ => ("auto", false),
+            }
         };
         let quality = StreamQuality::from_id(quality_str);
         let config = PlaybackConfig {

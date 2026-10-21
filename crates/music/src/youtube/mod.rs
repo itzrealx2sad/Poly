@@ -65,11 +65,10 @@ impl ytmusic::Minter for Minter {
 
 pub struct YouTubeProvider {
     credentials: PathBuf,
-    /// The cookie store ytmusic writes back to as Google rotates the session. The pasted
-    /// header in the credential file seeds it when it is missing.
     cookies: PathBuf,
     resolved: PathBuf,
     player: PathBuf,
+    guest_marker: PathBuf,
 }
 
 impl YouTubeProvider {
@@ -80,6 +79,7 @@ impl YouTubeProvider {
             cookies: cache.join("cookies.json"),
             resolved: cache.join("resolved.json"),
             player: cache.join("player.json"),
+            guest_marker: cache.join("guest"),
         }
     }
 
@@ -175,6 +175,7 @@ impl YouTubeProvider {
         let page_id = account.identity.page_id.clone();
         let profile = wire::profile(account.identity.profile.clone());
         credentials::remove(&self.cookies);
+        credentials::remove(&self.guest_marker);
         let api = self.cookie_client(&cookies, account.index, page_id.as_deref());
         self.store_cookies(&cookies, account.index, page_id.clone())?;
         log::debug!(
@@ -234,12 +235,8 @@ impl YouTubeProvider {
             .ok()
     }
 
-    /// Records that the user chose to listen as a guest, so the next launch restores that
-    /// instead of asking again. The rotating cookie store goes with it, since a guest client
-    /// never reads one.
     fn store_guest(&self) {
-        credentials::remove(&self.cookies);
-        if let Err(error) = self.save(&Saved::Guest) {
+        if let Err(error) = std::fs::write(&self.guest_marker, b"guest") {
             log::warn!("youtube: cannot remember the guest session: {error:#}");
         }
     }
@@ -317,14 +314,18 @@ impl MusicProvider for YouTubeProvider {
     }
 
     fn stored(&self) -> bool {
-        self.credentials.exists()
+        matches!(self.saved(), Some(Saved::Cookies { .. }))
     }
 
     fn stored_guest(&self) -> bool {
-        matches!(self.saved(), Some(Saved::Guest))
+        self.guest_marker.exists() || matches!(self.saved(), Some(Saved::Guest))
     }
 
     async fn restore(&self) -> Result<Option<ProviderSession>> {
+        if self.stored_guest() {
+            log::debug!("youtube: restoring guest session");
+            return Ok(Some(self.guest_session(self.guest_client())));
+        }
         match self.saved() {
             Some(Saved::Cookies {
                 cookies,
@@ -334,11 +335,7 @@ impl MusicProvider for YouTubeProvider {
                 self.restore_cookies(&cookies, authuser, page_id.as_deref())
                     .await
             }
-            Some(Saved::Guest) => {
-                log::debug!("youtube: restoring guest session");
-                Ok(Some(self.guest_session(self.guest_client())))
-            }
-            None => Ok(None),
+            _ => Ok(None),
         }
     }
 
@@ -370,6 +367,13 @@ impl MusicProvider for YouTubeProvider {
     fn sign_out(&self) {
         credentials::remove(&self.credentials);
         credentials::remove(&self.cookies);
+    }
+
+    fn sign_out_guest(&self) {
+        credentials::remove(&self.guest_marker);
+        if matches!(self.saved(), Some(Saved::Guest)) {
+            credentials::remove(&self.credentials);
+        }
     }
 
     fn web_sign_in(&self) -> Option<WebSignIn> {

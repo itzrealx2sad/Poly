@@ -309,6 +309,25 @@ impl Session {
         cx.notify();
     }
 
+    pub fn forget_guest(&mut self, slug: &str, cx: &mut Context<Self>) {
+        let Some(index) = self
+            .providers
+            .iter()
+            .position(|provider| provider.slug() == slug)
+        else {
+            return;
+        };
+        self.providers[index].sign_out_guest();
+        if self.active == Some(index) && self.guest() {
+            self.release(cx);
+            if self.providers[index].stored() {
+                self.restore(cx);
+            }
+        } else {
+            cx.notify();
+        }
+    }
+
     pub fn switch(&mut self, slug: &str, cx: &mut Context<Self>) {
         if self.is_pending() {
             return;
@@ -320,8 +339,11 @@ impl Session {
         else {
             return;
         };
-        if self.active == Some(index) && matches!(self.state, SessionState::SignedIn(_)) {
+        if self.active == Some(index) && matches!(self.state, SessionState::SignedIn(_)) && !self.guest() {
             return;
+        }
+        if self.active == Some(index) && self.guest() {
+            self.providers[index].sign_out_guest();
         }
         self.release(cx);
         self.active = Some(index);

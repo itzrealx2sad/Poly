@@ -37,7 +37,7 @@ use ui::{
     Theme, ThemeKind, Vacancy, VisualizerStyle,
 };
 
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("POLY_BUILD_VERSION");
 /// How wide the settings column, the search field and the category bar grow at most.
 const WIDTH: Pixels = px(640.);
 /// How much a query found in a setting's title counts over one found in its detail.
@@ -183,6 +183,7 @@ enum Slot {
     CrossfadeDuration,
     StreamingQuality,
     AppleSpatialAudio,
+    YouTubePremium,
     Sleep,
     StayAwake,
     Widevine,
@@ -248,7 +249,6 @@ struct Account {
 #[derive(Clone, Copy)]
 struct Guest {
     slug: &'static str,
-    stored: bool,
     active: bool,
 }
 
@@ -297,7 +297,11 @@ macro_rules! member {
     };
 }
 
-const MEMBERS: [Member; 5] = [
+const MEMBERS: [Member; 1] = [
+    member!("itzrealx2sad", Role::LeadMaintainer),
+];
+
+const FORKED_MEMBERS: [Member; 5] = [
     member!("nolight132", Role::LeadMaintainer),
     member!("zxsleebu", Role::Maintainer),
     member!("fx-got", Role::Maintainer),
@@ -642,6 +646,7 @@ impl SettingsView {
                     Slot::Title("settings-group-quality"),
                     Slot::StreamingQuality,
                     Slot::AppleSpatialAudio,
+                    Slot::YouTubePremium,
                     Slot::Sleep,
                     Slot::StayAwake,
                 ]);
@@ -820,6 +825,10 @@ impl SettingsView {
             Slot::AppleSpatialAudio => (
                 t!("settings-apple-spatial-audio"),
                 t!("settings-apple-spatial-audio-detail"),
+            ),
+            Slot::YouTubePremium => (
+                t!("settings-youtube-premium"),
+                t!("settings-youtube-premium-detail"),
             ),
             Slot::Sleep => (t!("settings-sleep"), t!("settings-sleep-detail")),
             Slot::StayAwake => (t!("settings-stay-awake"), t!("settings-stay-awake-detail")),
@@ -1043,6 +1052,7 @@ impl SettingsView {
             Slot::CrossfadeDuration => self.crossfade_duration_row(cx).element,
             Slot::StreamingQuality => self.streaming_quality_row(cx).element,
             Slot::AppleSpatialAudio => self.apple_spatial_audio_row(cx).element,
+            Slot::YouTubePremium => self.youtube_premium_row(cx).element,
             Slot::Sleep => self.sleep_row(cx).element,
             Slot::StayAwake => self.stay_awake_row(cx).element,
             Slot::Widevine => self.widevine_row(cx).element,
@@ -1703,11 +1713,25 @@ impl SettingsView {
         let active_info = session.providers().find(|info| info.active);
         let provider = active_info.as_ref().map(|info| info.name.to_string());
         let slug = active_info.as_ref().map(|info| info.slug).unwrap_or("");
-        let plan = match slug {
-            "spotify" | "youtube" => "Premium",
-            "apple" => "Subscriber",
-            "local" => "Local",
-            _ => "Free",
+        let is_guest = active_info.as_ref().is_some_and(|info| info.guest)
+            || session.guest()
+            || !session.authenticated();
+        let plan = if is_guest {
+            "Guest"
+        } else {
+            match slug {
+                "spotify" => "Premium",
+                "youtube" => {
+                    if self.settings.read(cx).youtube_premium() {
+                        "Premium"
+                    } else {
+                        "Free"
+                    }
+                }
+                "apple" => "Subscriber",
+                "local" => "Local",
+                _ => "Free",
+            }
         };
         let subtitle = match &provider {
             Some(provider) => format!("{plan} - {provider}"),
@@ -2448,60 +2472,125 @@ impl SettingsView {
         let small = theme.text(Text::Small);
         let current = self.settings.read(cx).streaming_quality().to_owned();
         let supports_lossless = self.session.read(cx).supports_lossless();
-        let label = match current.as_str() {
+        let session = self.session.read(cx);
+        let slug = session.provider_slug();
+        let is_guest = session.guest() || !session.authenticated();
+        let is_yt = slug == Some("youtube");
+        let yt_premium = self.settings.read(cx).youtube_premium();
+        let no_provider = slug.is_none();
+        let yt_non_premium = is_yt && !yt_premium;
+        let restricted_to_auto = is_guest || no_provider || yt_non_premium;
+
+        let effective_quality = if restricted_to_auto {
+            "auto"
+        } else {
+            current.as_str()
+        };
+
+        let label = match effective_quality {
+            "auto" => "Auto",
             "low" => "Low (96 kbps)",
             "medium" => "Normal (160 kbps)",
             "lossless" if supports_lossless => "Hi-Res Lossless",
             _ => "High (320 kbps)",
         };
 
-        let mut lossless_item = MenuItem::new("streaming-quality-lossless", "Hi-Res Lossless");
-        if supports_lossless {
-            lossless_item = lossless_item
-                .selected(current == "lossless")
+        let tooltip_msg = if is_yt && !yt_premium {
+            "YouTube Music Free only supports Auto quality"
+        } else if is_guest {
+            "Guest mode only supports Auto quality"
+        } else {
+            "Only Auto quality is available"
+        };
+
+        let auto_item = MenuItem::new("streaming-quality-auto", "Auto")
+            .selected(effective_quality == "auto")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.settings.update(cx, |settings, cx| {
+                    settings.set_streaming_quality("auto".to_owned(), cx);
+                });
+                this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                cx.notify();
+            }));
+
+        let low_item = if restricted_to_auto {
+            MenuItem::new("streaming-quality-low", "Low (96 kbps)")
+                .disabled()
+                .tooltip(tooltip_msg)
+        } else {
+            MenuItem::new("streaming-quality-low", "Low (96 kbps)")
+                .selected(effective_quality == "low")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.set_streaming_quality("low".to_owned(), cx);
+                    });
+                    this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                    cx.notify();
+                }))
+        };
+
+        let medium_item = if restricted_to_auto {
+            MenuItem::new("streaming-quality-medium", "Normal (160 kbps)")
+                .disabled()
+                .tooltip(tooltip_msg)
+        } else {
+            MenuItem::new("streaming-quality-medium", "Normal (160 kbps)")
+                .selected(effective_quality == "medium")
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.set_streaming_quality("medium".to_owned(), cx);
+                    });
+                    this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                    cx.notify();
+                }))
+        };
+
+        let high_item = if restricted_to_auto {
+            MenuItem::new("streaming-quality-high", "High (320 kbps)")
+                .disabled()
+                .tooltip(tooltip_msg)
+        } else {
+            MenuItem::new("streaming-quality-high", "High (320 kbps)")
+                .selected(
+                    effective_quality == "high"
+                        || (!supports_lossless && effective_quality == "lossless"),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.set_streaming_quality("high".to_owned(), cx);
+                    });
+                    this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                    cx.notify();
+                }))
+        };
+
+        let lossless_item = if restricted_to_auto {
+            MenuItem::new("streaming-quality-lossless", "Hi-Res Lossless")
+                .disabled()
+                .tooltip(tooltip_msg)
+        } else if supports_lossless {
+            MenuItem::new("streaming-quality-lossless", "Hi-Res Lossless")
+                .selected(effective_quality == "lossless")
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.settings.update(cx, |settings, cx| {
                         settings.set_streaming_quality("lossless".to_owned(), cx);
                     });
                     this.playback.update(cx, |p, cx| p.reload_engine(cx));
                     cx.notify();
-                }));
+                }))
         } else {
-            lossless_item = lossless_item
+            MenuItem::new("streaming-quality-lossless", "Hi-Res Lossless")
                 .disabled()
-                .tooltip("Requires Apple Music or supported lossless region");
-        }
+                .tooltip("Requires Apple Music or supported lossless region")
+        };
 
         let picker = Picker::new("streaming-quality", &self.popovers, label)
             .width(Picker::NARROW)
             .items([
-                MenuItem::new("streaming-quality-low", "Low (96 kbps)")
-                    .selected(current == "low")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.update(cx, |settings, cx| {
-                            settings.set_streaming_quality("low".to_owned(), cx);
-                        });
-                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
-                        cx.notify();
-                    })),
-                MenuItem::new("streaming-quality-medium", "Normal (160 kbps)")
-                    .selected(current == "medium")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.update(cx, |settings, cx| {
-                            settings.set_streaming_quality("medium".to_owned(), cx);
-                        });
-                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
-                        cx.notify();
-                    })),
-                MenuItem::new("streaming-quality-high", "High (320 kbps)")
-                    .selected(current == "high" || (!supports_lossless && current == "lossless"))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.settings.update(cx, |settings, cx| {
-                            settings.set_streaming_quality("high".to_owned(), cx);
-                        });
-                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
-                        cx.notify();
-                    })),
+                auto_item,
+                low_item,
+                medium_item,
+                high_item,
                 lossless_item,
             ]);
 
@@ -2511,6 +2600,37 @@ impl SettingsView {
             muted,
             small,
             picker.into_any_element(),
+        )
+    }
+
+    fn youtube_premium_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let on = self.settings.read(cx).youtube_premium();
+        let session = self.session.read(cx);
+        let is_yt = session.provider_slug() == Some("youtube");
+        let is_signed_in = is_yt && session.authenticated() && !session.guest();
+
+        let switch = Switch::new("youtube-premium", on && is_signed_in)
+            .disabled(!is_signed_in)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !is_signed_in {
+                    return;
+                }
+                this.settings.update(cx, |settings, cx| {
+                    settings.set_youtube_premium(!on, cx);
+                });
+                this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                cx.notify();
+            }));
+
+        self.row(
+            t!("settings-youtube-premium"),
+            t!("settings-youtube-premium-detail"),
+            muted,
+            small,
+            switch.into_any_element(),
         )
     }
 
@@ -3795,7 +3915,6 @@ impl SettingsView {
         };
         Some(Guest {
             slug: info.slug,
-            stored: info.guest,
             active,
         })
     }
@@ -3885,12 +4004,14 @@ impl SettingsView {
             cancel,
             error,
         } = account;
-        let status = Some(match (active, stored) {
+        let is_guest = self.session.read(cx).guest();
+        let active_account = active && !is_guest;
+        let status = Some(match (active_account, stored) {
             (true, _) => t!("settings-provider-current"),
             (false, true) => t!("settings-provider-connected"),
             (false, false) => t!("settings-provider-none"),
         });
-        let press: Option<Press> = match (cancel, stored, active) {
+        let press: Option<Press> = match (cancel, stored, active_account) {
             (true, ..) | (_, true, true) => None,
             (false, true, false) => Some(Box::new(cx.listener(move |this, _, _, cx| {
                 this.chosen = Some(slug);
@@ -3909,7 +4030,7 @@ impl SettingsView {
                 logo: crate::shared::provider_logo(slug),
                 name: name.into(),
                 status,
-                selected: active,
+                selected: active_account,
                 trailing: self.trailing(slug, slug, stored, cancel, pending, cx),
                 error,
                 press: press.filter(|_| !pending),
@@ -3923,18 +4044,12 @@ impl SettingsView {
     fn guest_card(&self, guest: Guest, pending: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let Guest {
             slug,
-            stored,
             active,
         } = guest;
         let status = active.then(|| t!("settings-provider-guest"));
-        let press: Option<Press> = match (stored, active) {
-            (_, true) => None,
-            (true, false) => Some(Box::new(cx.listener(move |this, _, _, cx| {
-                this.chosen = Some(GUEST);
-                this.session
-                    .update(cx, |session, cx| session.switch(slug, cx));
-            }))),
-            (false, false) => Some(Box::new(cx.listener(move |this, _, _, cx| {
+        let press: Option<Press> = match active {
+            true => None,
+            false => Some(Box::new(cx.listener(move |this, _, _, cx| {
                 this.chosen = Some(GUEST);
                 this.session.update(cx, |session, cx| {
                     session.sign_in(slug, SignIn::Anonymous, cx)
@@ -4005,8 +4120,13 @@ impl SettingsView {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.chosen = None;
-                this.session
-                    .update(cx, |session, cx| session.forget(slug, cx));
+                if id == GUEST {
+                    this.session
+                        .update(cx, |session, cx| session.forget_guest(slug, cx));
+                } else {
+                    this.session
+                        .update(cx, |session, cx| session.forget(slug, cx));
+                }
             }))
             .into_any_element()
     }
@@ -4375,6 +4495,54 @@ impl SettingsView {
                 .children(MEMBERS.into_iter().enumerate().map(|(index, member)| {
                     div()
                         .id(("team-member", index))
+                        .flex()
+                        .items_center()
+                        .gap_3()
+                        .px(theme.metrics.pad)
+                        .py(theme.metrics.pad / 2.)
+                        .rounded(theme.radius)
+                        .cursor_pointer()
+                        .hover(|style| style.bg(theme.secondary_hover))
+                        .on_click(move |_, _, cx| cx.open_url(member.profile))
+                        .child(Avatar::new(Some(member.avatar)).size(theme.metrics.thumb))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_w_0()
+                                .gap_0p5()
+                                .child(div().font_weight(FontWeight::MEDIUM).child(member.login))
+                                .child(
+                                    div()
+                                        .text_size(theme.text(Text::Small))
+                                        .text_color(theme.muted_foreground)
+                                        .child(t!("settings-team-github")),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .text_size(theme.text(Text::Small))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(theme.muted_foreground)
+                                .child(member.role.label()),
+                        )
+                })),
+        )
+    }
+
+    fn forked_from(&self, cx: &Context<Self>) -> impl IntoElement {
+        let theme = *cx.theme();
+
+        InfoCard::new(t!("settings-forked-from")).flex_none().child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .children(FORKED_MEMBERS.into_iter().enumerate().map(|(index, member)| {
+                    div()
+                        .id(("forked-member", index))
                         .flex()
                         .items_center()
                         .gap_3()
@@ -4861,7 +5029,9 @@ impl Render for SettingsView {
                             })
                             .child(self.panel(window, cx))
                             .when(about, |this| {
-                                this.child(self.team(cx)).child(self.notice(cx))
+                                this.child(self.team(cx))
+                                    .child(self.forked_from(cx))
+                                    .child(self.notice(cx))
                             }),
                     ),
             )
