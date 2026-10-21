@@ -1684,20 +1684,26 @@ impl SettingsView {
     fn profile(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         let muted = theme.muted_foreground;
-        // The service the account belongs to, named next to the region so the card says which
-        // provider it is rather than a bare country code.
-        let provider = self
-            .session
-            .read(cx)
-            .providers()
-            .find(|info| info.active)
-            .map(|info| info.name.to_string());
+        let session = self.session.read(cx);
+        let active_info = session.providers().find(|info| info.active);
+        let provider = active_info.as_ref().map(|info| info.name.to_string());
+        let slug = active_info.as_ref().map(|info| info.slug).unwrap_or("");
+        let plan = match slug {
+            "spotify" | "youtube" => "Premium",
+            "apple" => "Subscriber",
+            "local" => "Local",
+            _ => "Free",
+        };
+        let subtitle = match &provider {
+            Some(provider) => format!("{plan} - {provider}"),
+            None => format!("{plan} - Poly"),
+        };
 
         div()
             .flex()
             .items_center()
             .gap_4()
-            .child(match self.session.read(cx).state() {
+            .child(match session.state() {
                 SessionState::SignedIn(profile) => match &profile.avatar {
                     Some(avatar) => Avatar::new(Some(avatar.clone()))
                         .size(px(64.))
@@ -1711,7 +1717,7 @@ impl SettingsView {
                     .flex()
                     .flex_col()
                     .gap_1()
-                    .child(match self.session.read(cx).state() {
+                    .child(match session.state() {
                         SessionState::SignedIn(profile) => div()
                             .child(profile.display_name.clone())
                             .text_size(theme.text(Text::Large))
@@ -1719,16 +1725,9 @@ impl SettingsView {
                             .into_any_element(),
                         _ => Skeleton::new().w(px(140.)).h(px(14.)).into_any_element(),
                     })
-                    .child(match self.session.read(cx).state() {
-                        SessionState::SignedIn(profile) => div()
-                            .child(match &provider {
-                                Some(provider) => t!(
-                                    "settings-profile-account",
-                                    provider = provider,
-                                    account = &profile.id
-                                ),
-                                None => profile.id.clone().into(),
-                            })
+                    .child(match session.state() {
+                        SessionState::SignedIn(_) => div()
+                            .child(subtitle)
                             .text_color(muted)
                             .text_size(theme.text(Text::Small))
                             .into_any_element(),
