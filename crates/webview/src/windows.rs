@@ -154,8 +154,13 @@ impl Window {
     }
 
     pub(crate) fn close(&self) {
-        if let Some(browser) = self.browser.borrow_mut().take() {
-            let _ = unsafe { browser.controller.Close() };
+        let controller = self
+            .browser
+            .borrow_mut()
+            .take()
+            .map(|browser| browser.controller);
+        if let Some(controller) = controller {
+            let _ = unsafe { controller.Close() };
         }
         if !self.closed() {
             let _ = unsafe { DestroyWindow(self.hwnd) };
