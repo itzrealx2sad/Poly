@@ -6,8 +6,6 @@
   <img src="./assets/poly-logo.svg" alt="Poly Logo" height="80">
 </picture>
 
-# Poly Windows
-
 ### An enhanced, native music streaming client built with Rust and GPUI.
 **A fork of [Sonora](https://github.com/sonorahq/sonora)**
 
