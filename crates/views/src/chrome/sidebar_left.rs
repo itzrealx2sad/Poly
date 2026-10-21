@@ -3,8 +3,8 @@
 // Modifications Copyright (C) 2026 Poly Project Contributors
 
 use gpui::prelude::*;
-use gpui::{App, Context, Entity, Pixels, Render, ScrollHandle, Window, div, px, svg};
-use router::{Destination, LibraryTab, Navigation, NavigationEvent, SettingsTab, navigate};
+use gpui::{App, Context, Entity, Pixels, Render, ScrollHandle, SharedString, Window, div, px, svg};
+use router::{Destination, LibraryTab, NavEntry, Navigation, NavigationEvent, SettingsTab, navigate};
 use state::{AppSettings, Library, Pins, Playback, Session, Sonora};
 use ui::{ActiveTheme as _, Scrollbar, Tipped as _};
 
@@ -126,12 +126,9 @@ impl Render for SidebarLeft {
         }
 
         let current = self.trail.read(cx).current();
-        let is_home = matches!(current, Destination::Home);
-        let is_search = matches!(current, Destination::Search);
-        let is_library = matches!(current, Destination::Library(_) | Destination::Local(_));
         let is_settings = matches!(current, Destination::Settings(_));
 
-        let nav_btn = |id: &'static str, icon: &'static str, tip: &'static str, active: bool, dest: Destination| {
+        let nav_btn = |id: SharedString, icon: &'static str, tip: SharedString, active: bool, dest: Destination| {
             let tint = match active {
                 true => theme.foreground,
                 false => theme.muted_foreground,
@@ -162,6 +159,17 @@ impl Render for SidebarLeft {
                 .tip_label(tip, ui::Perch::Pointer)
                 .on_click(move |_, _, cx| navigate(dest.clone(), cx))
         };
+
+        let nav_items: Vec<_> = NavEntry::ALL
+            .into_iter()
+            .filter(|entry| self.settings.read(cx).nav_shown(entry.id()))
+            .map(|entry| {
+                let id = SharedString::from(entry.id());
+                let tip = i18n::lookup(entry.key(), None);
+                let active = entry.is_active(&current);
+                nav_btn(id, entry.icon(), tip, active, entry.destination())
+            })
+            .collect();
 
         let ambient = crate::shared::ambient::shown(cx) && self.settings.read(cx).adaptive_theme();
 
@@ -215,27 +223,7 @@ impl Render for SidebarLeft {
                             .flex_col()
                             .items_center()
                             .gap(px(8.))
-                            .child(nav_btn(
-                                "nav-home",
-                                "icons/house.svg",
-                                "Home",
-                                is_home,
-                                Destination::Home,
-                            ))
-                            .child(nav_btn(
-                                "nav-search",
-                                "icons/search.svg",
-                                "Search",
-                                is_search,
-                                Destination::Search,
-                            ))
-                            .child(nav_btn(
-                                "nav-library",
-                                "icons/bookmark.svg",
-                                "Your Library",
-                                is_library,
-                                Destination::Library(LibraryTab::Songs),
-                            )),
+                            .children(nav_items),
                     ),
             )
             .child(
@@ -244,9 +232,9 @@ impl Render for SidebarLeft {
                     .flex_col()
                     .items_center()
                     .child(nav_btn(
-                        "nav-settings",
+                        SharedString::from("nav-settings"),
                         "icons/settings.svg",
-                        "Settings",
+                        i18n::lookup("nav-settings", None),
                         is_settings,
                         Destination::Settings(SettingsTab::General),
                     )),
