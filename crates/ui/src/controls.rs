@@ -191,13 +191,17 @@ impl RenderOnce for WindowControls {
             .when_else(
                 is_windows,
                 |this| {
-                    this.px(px(8.))
+                    let base = this
+                        .px(px(8.))
                         .py(px(4.))
                         .gap(px(6.))
                         .rounded(px(10.))
-                        .bg(theme.foreground.opacity(0.08))
                         .border_1()
-                        .border_color(theme.foreground.opacity(0.12))
+                        .border_color(theme.border);
+                    match crate::glass::blurring(cx) {
+                        true => crate::glass::glass(base, cx),
+                        false => base.bg(theme.secondary),
+                    }
                 },
                 |this| this.gap_2(),
             )

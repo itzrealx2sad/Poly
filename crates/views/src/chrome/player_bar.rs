@@ -469,7 +469,7 @@ impl Render for PlayerBar {
             .child(self.sound(px(VOLUME_TIGHT), cx))
             .child(self.fullscreen_button());
 
-        let ambient = crate::shared::ambient::shown(cx) && self.settings.read(cx).adaptive_theme();
+        let ambient = crate::shared::ambient::shown(cx);
 
         let base = div()
             .flex()

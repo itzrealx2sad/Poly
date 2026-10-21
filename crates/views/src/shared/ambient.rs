@@ -244,9 +244,9 @@ impl Render for Ambient {
         let theme = *cx.theme();
         // Without motion the field is a still gradient: no frame requests, so
         // fullscreen stops redrawing once settled. Either the system preference
-        // or the setting of its own is enough to stop it.
-        let animates =
-            ui::motion::animates(cx) && Sonora::global(cx).settings.read(cx).ambient_motion();
+        let animates = window.is_window_active()
+            && ui::motion::animates(cx)
+            && Sonora::global(cx).settings.read(cx).ambient_motion();
         // The drift asks for the next frame off the display's own clock rather than a timer of
         // its own. A timer is never in phase with the refresh, so a blob that moves a fraction
         // of a pixel per frame lands on one vsync, skips the next and doubles the one after,

@@ -93,6 +93,8 @@ pub struct Root {
     screens: Screens,
     adaptive: Entity<Adaptive>,
     background: Option<gpui::WindowBackgroundAppearance>,
+    #[cfg(target_os = "windows")]
+    backdrop_state: Option<(bool, bool)>,
     /// The font the window is set in and the name it was built from, rebuilt only when the
     /// chosen font changes since the root renders every frame anything below it animates.
     font: Option<(String, Font)>,
@@ -321,6 +323,8 @@ impl Root {
             adaptive,
             ambient,
             background: None,
+            #[cfg(target_os = "windows")]
+            backdrop_state: None,
             font: None,
             #[cfg(target_os = "windows")]
             rounded: None,
@@ -801,7 +805,10 @@ impl Render for Root {
         if self.background != Some(appearance) {
             self.background = Some(appearance);
             window.set_background_appearance(appearance);
-            #[cfg(target_os = "windows")]
+        }
+        #[cfg(target_os = "windows")]
+        if self.backdrop_state != Some((theme.blur_window, theme.transparent)) {
+            self.backdrop_state = Some((theme.blur_window, theme.transparent));
             state::apply_window_backdrop(window, theme.blur_window, theme.transparent, cx);
         }
 
