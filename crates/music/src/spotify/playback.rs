@@ -385,7 +385,11 @@ impl Engine {
 
     fn play(&self) {
         let active = self.active_deck.read().ok().map_or(0, |deck| *deck);
-        self.deck(active).player.play();
+        let deck = self.deck(active);
+        if deck.cue.cleared() {
+            return;
+        }
+        deck.player.play();
     }
 
     fn pause(&self) {

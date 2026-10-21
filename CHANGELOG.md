@@ -9,6 +9,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Spotify resume now ignores an active deck that is still waiting for fresh audio instead of sending it a play command while stopped.
 - Spotify resume and pause no longer send transport commands to the inactive stopped deck.
 - LrcLib transient service outages are retried without preventing other lyric providers from answering.
 
