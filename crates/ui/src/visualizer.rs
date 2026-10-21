@@ -38,10 +38,10 @@ const WAVE_STEPS: usize = 8;
 /// How the spectrum is drawn behind the fullscreen artwork.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum VisualizerStyle {
+    #[default]
     None,
     Bars,
     Wave,
-    #[default]
     Both,
 }
 
@@ -66,6 +66,7 @@ impl VisualizerStyle {
             "none" => Self::None,
             "bars" => Self::Bars,
             "wave" => Self::Wave,
+            "both" => Self::Both,
             _ => Self::default(),
         }
     }

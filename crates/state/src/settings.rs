@@ -649,7 +649,7 @@ impl Default for Appearance {
             adaptive_theme: true,
             ambient: true,
             ambient_motion: true,
-            visualizer: true,
+            visualizer: false,
             visualizer_style: ui::VisualizerStyle::default().id().to_owned(),
             visualizer_absolute: false,
             icons: icons::BASE.to_owned(),
