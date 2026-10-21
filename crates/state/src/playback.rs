@@ -1771,7 +1771,7 @@ impl Playback {
     pub fn resume(&mut self, cx: &mut Context<Self>) {
         self.intent = Intent::Play;
         if let Some(at) = self.resume_at {
-            if !self.resume_ready {
+            if !self.resume_ready || self.active_engine().is_none() {
                 return self.reload_and_seek(at, cx);
             }
             self.resume_at = None;

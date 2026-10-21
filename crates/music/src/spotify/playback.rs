@@ -183,6 +183,7 @@ pub struct Engine {
     deck_b: Deck,
     active_deck: Arc<RwLock<usize>>,
     active_id: Arc<RwLock<Option<String>>>,
+    active_at: Arc<RwLock<Duration>>,
     sync: Arc<TransitionSync>,
     volume: Volume,
     spectrum: Spectrum,
@@ -217,6 +218,7 @@ impl Engine {
         let (events_tx, events_rx) = unbounded_channel();
         let active_deck = Arc::new(RwLock::new(0));
         let active_id = Arc::new(RwLock::new(None));
+        let active_at = Arc::new(RwLock::new(Duration::ZERO));
         let sync = Arc::new(TransitionSync::new());
 
         let (cue_a, written_a) = Cue::new();
@@ -283,6 +285,7 @@ impl Engine {
             deck_b,
             active_deck,
             active_id,
+            active_at,
             sync,
             volume,
             spectrum,
@@ -339,6 +342,9 @@ impl Engine {
             if let Ok(mut active) = self.active_id.write() {
                 *active = Some(track_id.to_owned());
             }
+            if let Ok(mut active_at) = self.active_at.write() {
+                *active_at = Duration::ZERO;
+            }
 
             self.sync.bump_deck(incoming_idx);
             let outgoing_epoch = self.sync.deck_epoch(current_idx);
@@ -379,6 +385,9 @@ impl Engine {
         if let Ok(mut active) = self.active_id.write() {
             *active = Some(track_id.to_owned());
         }
+        if let Ok(mut active_at) = self.active_at.write() {
+            *active_at = at;
+        }
         self.deck(active_idx).state.store(DECK_LOADING, Ordering::SeqCst);
         self.deck(active_idx)
             .player
@@ -405,6 +414,9 @@ impl Engine {
         if let Ok(mut active) = self.active_id.write() {
             *active = Some(track_id.to_owned());
         }
+        if let Ok(mut active_at) = self.active_at.write() {
+            *active_at = at;
+        }
         self.deck(active_idx).state.store(DECK_LOADING, Ordering::SeqCst);
         self.deck(active_idx)
             .player
@@ -424,7 +436,16 @@ impl Engine {
         let active = self.active_deck.read().ok().map_or(0, |deck| *deck);
         let deck = self.deck(active);
         let state = deck.state.load(Ordering::SeqCst);
-        if state == DECK_STOPPED || state == DECK_PLAYING || deck.cue.cleared() {
+        if state == DECK_PLAYING {
+            return;
+        }
+        if state == DECK_STOPPED {
+            if let Ok(active_id) = self.active_id.read()
+                && let Some(id) = active_id.as_deref()
+            {
+                let at = self.active_at.read().ok().map(|at| *at).unwrap_or(Duration::ZERO);
+                let _ = self.load(id, at, false);
+            }
             return;
         }
         deck.player.play();
@@ -451,6 +472,9 @@ impl Engine {
             ctrl.intro_secs = 0.0;
             ctrl.outro_trigger = 0;
             ctrl.outro_secs = 0.0;
+        }
+        if let Ok(mut active_at) = self.active_at.write() {
+            *active_at = position;
         }
         self.deck(active_idx)
             .player
