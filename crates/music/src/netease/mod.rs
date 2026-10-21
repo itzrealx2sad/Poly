@@ -12,11 +12,8 @@ const SOURCE: &str = "NetEase";
 const SEARCH: &str = "https://music.163.com/api/search/get";
 const LYRIC: &str = "https://music.163.com/api/song/lyric/v1";
 const CANDIDATES: usize = 3;
-const AGENT: &str = concat!(
-    "sonora/",
-    env!("CARGO_PKG_VERSION"),
-    " (https://github.com/sonorahq/sonora)"
-);
+const AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 pub struct NetEase {
     http: reqwest::Client,
@@ -25,7 +22,11 @@ pub struct NetEase {
 impl NetEase {
     pub fn new() -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(6))
+                .tcp_keepalive(Some(Duration::from_secs(15)))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -44,7 +45,8 @@ impl NetEase {
                 ("yrv", "0"),
             ])
             .header("User-Agent", AGENT)
-            .header("Referer", "https://music.163.com")
+            .header("Referer", "https://music.163.com/")
+            .header("Origin", "https://music.163.com")
             .send()
             .await
             .context("cannot reach netease")?;
@@ -118,7 +120,8 @@ impl LyricsProvider for NetEase {
             .get(SEARCH)
             .query(&[("s", wanted.as_str()), ("type", "1"), ("limit", "5")])
             .header("User-Agent", AGENT)
-            .header("Referer", "https://music.163.com")
+            .header("Referer", "https://music.163.com/")
+            .header("Origin", "https://music.163.com")
             .send()
             .await
             .context("cannot reach netease")?;
@@ -142,7 +145,7 @@ impl LyricsProvider for NetEase {
                     .lyric(song.id)
                     .await
                     .inspect_err(|error| {
-                        log::warn!("lyrics: netease did not hand over {}: {error:#}", song.id)
+                        log::debug!("lyrics: netease did not hand over {}: {error:#}", song.id)
                     })
                     .ok()?;
                 hit(&song, &sheet)
