@@ -156,7 +156,7 @@ impl Render for SidebarLeft {
                         .size(px(18.))
                         .text_color(tint),
                 )
-                .tip_label(tip, ui::Perch::Pointer)
+                .tip_label(tip, ui::Perch::Right)
                 .on_click(move |_, _, cx| navigate(dest.clone(), cx))
         };
 
@@ -214,7 +214,7 @@ impl Render for SidebarLeft {
                                     .size(px(20.))
                                     .text_color(theme.foreground),
                             )
-                            .tip_label("Poly Music", ui::Perch::Pointer)
+                            .tip_label("Poly Music", ui::Perch::Right)
                             .on_click(|_, _, cx| navigate(Destination::Home, cx)),
                     )
                     .child(

@@ -36,9 +36,8 @@ const PREROLL: usize = 256 * 1024;
 /// The longest a box header can be: a size, a kind and a 64-bit size behind them.
 const BOX_HEADER: usize = 16;
 
-/// The pause between two samples of the background pass. It leaves the CDM and the track free
-/// for a moment, so a read on the audio thread never queues behind a run of them.
-const PACE: Duration = Duration::from_micros(500);
+const BATCH: usize = 4;
+const PACE: Duration = Duration::from_millis(16);
 
 /// The fewest bytes a sample is assumed to hold when sizing the index, which caps what a
 /// first fragment of implausibly small samples can make it reserve.
@@ -77,11 +76,8 @@ enum License {
     Released,
 }
 
-/// What one step of the background pass did.
 enum Pass {
-    Cleared,
-    /// Nothing was left to decrypt, and these are the keys that were let go. They are dropped
-    /// outside the track's lock.
+    Cleared(usize),
     Finished(Option<Keys>),
 }
 
@@ -313,22 +309,28 @@ impl Cenc {
         Ok(took)
     }
 
-    /// One step of the background pass: decrypts the first sample at or after `next` that no
-    /// read has reached, or releases the license when there is none. Only called once the
-    /// download is complete, when the index can no longer grow.
     fn pass(&mut self, spool: &mut Spool, next: &mut usize) -> io::Result<Pass> {
-        self.index(spool);
-        let found = (*next..self.seals.len()).find(|&index| self.seals[index] == Seal::Encrypted);
-        let Some(index) = found else {
-            let keys = match std::mem::replace(&mut self.license, License::Released) {
-                License::Held(keys) => Some(keys),
-                License::Pending | License::Released => None,
+        if self.walked < spool.len() {
+            self.index(spool);
+        }
+        let mut count = 0usize;
+        while count < BATCH {
+            let found = (*next..self.seals.len()).find(|&index| self.seals[index] == Seal::Encrypted);
+            let Some(index) = found else {
+                if count > 0 {
+                    return Ok(Pass::Cleared(count));
+                }
+                let keys = match std::mem::replace(&mut self.license, License::Released) {
+                    License::Held(keys) => Some(keys),
+                    License::Pending | License::Released => None,
+                };
+                return Ok(Pass::Finished(keys));
             };
-            return Ok(Pass::Finished(keys));
-        };
-        self.clear(spool, index)?;
-        *next = index + 1;
-        Ok(Pass::Cleared)
+            self.clear(spool, index)?;
+            *next = index + 1;
+            count += 1;
+        }
+        Ok(Pass::Cleared(count))
     }
 
     /// A fragment's decode time as a position, once the timescale is known.
@@ -530,9 +532,6 @@ impl Media {
     }
 }
 
-/// Decrypts what is left of a complete track one sample at a time, letting go of the track
-/// between samples, then releases its license. Stops early when every other handle on the
-/// track is gone, or on a failure, which leaves the keys in place for the reads to use.
 fn clear_rest(weak: &WeakStream<Cenc>) {
     let began = Instant::now();
     let mut next = 0;
@@ -544,7 +543,7 @@ fn clear_rest(weak: &WeakStream<Cenc>) {
         let step = stream.with(|cenc, spool| cenc.pass(spool, &mut next));
         drop(stream);
         match step {
-            Some(Ok(Pass::Cleared)) => count += 1,
+            Some(Ok(Pass::Cleared(n))) => count += n,
             Some(Ok(Pass::Finished(keys))) => {
                 drop(keys);
                 log::info!(

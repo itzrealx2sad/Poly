@@ -23,11 +23,8 @@ const SHEETS: usize = 2;
 const CIPHER: [u8; 16] = [
     0x40, 0x47, 0x61, 0x77, 0x5e, 0x32, 0x74, 0x47, 0x51, 0x36, 0x31, 0x2d, 0xce, 0xd2, 0x6e, 0x69,
 ];
-const AGENT: &str = concat!(
-    "sonora/",
-    env!("CARGO_PKG_VERSION"),
-    " (https://github.com/sonorahq/sonora)"
-);
+const AGENT: &str =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 pub struct Kugou {
     http: reqwest::Client,
@@ -36,7 +33,11 @@ pub struct Kugou {
 impl Kugou {
     pub fn new() -> Self {
         Self {
-            http: reqwest::Client::new(),
+            http: reqwest::Client::builder()
+                .timeout(Duration::from_secs(6))
+                .tcp_keepalive(Some(Duration::from_secs(15)))
+                .build()
+                .unwrap_or_default(),
         }
     }
 
@@ -190,13 +191,13 @@ impl LyricsProvider for Kugou {
                     .candidates(&song)
                     .await
                     .inspect_err(|error| {
-                        log::warn!("lyrics: kugou did not list {}: {error:#}", song.hash)
+                        log::debug!("lyrics: kugou did not list {}: {error:#}", song.hash)
                     })
                     .ok()?;
                 let mut hits = Vec::new();
                 for candidate in worded_first(candidates) {
                     let Ok(krc) = kugou.krc(&candidate).await.inspect_err(|error| {
-                        log::warn!(
+                        log::debug!(
                             "lyrics: kugou did not hand over {}: {error:#}",
                             candidate.id
                         )

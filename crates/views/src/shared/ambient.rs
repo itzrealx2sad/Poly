@@ -23,7 +23,7 @@
 use std::cell::Cell;
 use std::f32::consts::TAU;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{App, Bounds, Context, Hsla, Render, Rgba, Window, canvas, div, point, px};
@@ -67,8 +67,7 @@ const SPECS: [(f32, f32, f32, f32, f32, f32, f32); BLOBS] = [
     (0.85, 0.72, 0.72, 31., 2.5, 0.12, 0.11),
 ];
 
-/// Concentric discs faking a radial falloff.
-const DISCS: usize = 7;
+const DISCS: usize = 4;
 /// Opacity ramp from the outermost disc to the core.
 const DISC_FAINT: f32 = 0.08;
 const DISC_STRONG: f32 = 0.24;
@@ -81,6 +80,7 @@ pub(crate) struct Ambient {
     stepped: Instant,
     bounds: Rc<Cell<Bounds<gpui::Pixels>>>,
     painted: Option<[Hsla; BLOBS]>,
+    animating: bool,
 }
 
 impl Ambient {
@@ -96,6 +96,7 @@ impl Ambient {
             stepped: now,
             bounds: Rc::new(Cell::new(Bounds::default())),
             painted: None,
+            animating: false,
         }
     }
 
@@ -243,20 +244,35 @@ impl Render for Ambient {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = *cx.theme();
         // Without motion the field is a still gradient: no frame requests, so
-        // fullscreen stops redrawing once settled. Either the system preference
         let animates = window.is_window_active()
             && ui::motion::animates(cx)
             && Sonora::global(cx).settings.read(cx).ambient_motion();
-        // The drift asks for the next frame off the display's own clock rather than a timer of
-        // its own. A timer is never in phase with the refresh, so a blob that moves a fraction
-        // of a pixel per frame lands on one vsync, skips the next and doubles the one after,
-        // which reads as a twitch however slow the motion is. Cost belongs in the field below,
-        // not in the frame rate.
+        if animates && !self.animating {
+            self.animating = true;
+            cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor().timer(Duration::from_millis(30)).await;
+                    let running = this.update(cx, |this, cx| {
+                        let active = Sonora::global(cx).settings.read(cx).ambient_motion()
+                            && ui::motion::animates(cx);
+                        if active && this.animating {
+                            cx.notify();
+                            true
+                        } else {
+                            this.animating = false;
+                            false
+                        }
+                    });
+                    if !running.unwrap_or(false) {
+                        break;
+                    }
+                }
+            }).detach();
+        } else if !animates && self.animating {
+            self.animating = false;
+        }
         let elapsed = match animates {
-            true => {
-                window.request_animation_frame();
-                self.started.elapsed().as_secs_f32()
-            }
+            true => self.started.elapsed().as_secs_f32(),
             false => 0.,
         };
         let colors = self.wash(Self::colors(&theme), animates);

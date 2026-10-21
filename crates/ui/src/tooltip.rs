@@ -15,13 +15,11 @@ const OFFSET: Pixels = px(6.);
 /// Where a tooltip sits relative to the pointer that summoned it.
 #[derive(Clone, Copy, Default, PartialEq)]
 pub enum Perch {
-    /// Below and to the left of the pointer, fixed where the hover delay ended.
     #[default]
     Pointer,
-    /// Centred above the pointer, clear of a small control under it.
     Above,
-    /// Placed like `Pointer`, but shown the moment the pointer arrives and moved along with it.
     Follow,
+    Right,
 }
 
 pub struct Tooltip {
@@ -102,10 +100,14 @@ impl Render for Tooltip {
             false => self.at,
         };
         let (position, anchor) = match self.perch {
-            Perch::Pointer | Perch::Follow => (at + point(-OFFSET, OFFSET), Anchor::TopRight),
+            Perch::Pointer | Perch::Follow => (at + point(OFFSET, OFFSET), Anchor::TopLeft),
             Perch::Above => (
                 point(at.x, at.y - theme.metrics.control_small / 2.),
                 Anchor::BottomCenter,
+            ),
+            Perch::Right => (
+                point(at.x + OFFSET + px(8.), at.y),
+                Anchor::LeftCenter,
             ),
         };
 
@@ -132,11 +134,11 @@ impl Render for Tooltip {
     }
 }
 
-/// Drops the hover delay for a perch that has to be there the moment the pointer arrives.
 fn timed<E: StatefulInteractiveElement>(element: E, perch: Perch) -> E {
     match perch {
         Perch::Follow => element.tooltip_show_delay(Duration::ZERO),
-        Perch::Pointer | Perch::Above => element,
+        Perch::Right => element.tooltip_show_delay(Duration::from_millis(80)),
+        Perch::Pointer | Perch::Above => element.tooltip_show_delay(Duration::from_millis(150)),
     }
 }
 
