@@ -2000,6 +2000,9 @@ impl AppSettings {
 
     /// Watches the config and themes folders for changes made by another program.
     pub fn watch_files(&mut self, cx: &mut Context<Self>) {
+        if self.watcher.is_some() {
+            return;
+        }
         let (Some(folder), Some(settings_name)) = (self.path.parent(), self.path.file_name())
         else {
             return;

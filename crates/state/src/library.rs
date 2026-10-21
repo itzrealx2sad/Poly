@@ -817,7 +817,9 @@ impl Library {
                 }
                 this.pin_targets = None;
                 this.sync_pin_targets(cx);
-                this.prime(Shelf::Streaming, cx);
+                if matches!(this.held(Shelf::Streaming).state, LibraryState::Empty) {
+                    this.prime(Shelf::Streaming, cx);
+                }
                 this.load(Shelf::Streaming, cx);
             }
             SessionEvent::SignedOut => {
@@ -2177,16 +2179,17 @@ impl Library {
             while let Some(page) = pages.recv().await {
                 let landed = match page {
                     Ok(Page { total, items }) => {
-                        let placed = this.update(cx, |this, cx| {
+                        let placed = this.update(cx, |this, _| {
                             let held = this.held_mut(shelf);
                             if held.stale.contains(&part) {
                                 return Some(items);
                             }
                             if let Some(total) = total {
-                                held.expected.insert(part, total);
+                                if !held.expected.contains_key(&part) {
+                                    held.expected.insert(part, total);
+                                }
                             }
                             extend(&mut held.state, wrap(Ok(items)));
-                            cx.notify();
                             None
                         });
                         match placed {

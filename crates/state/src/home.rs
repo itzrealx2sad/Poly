@@ -83,7 +83,6 @@ impl Home {
         // A restore that ends offline sends no event of its own, and Quick picks wait for it.
         cx.observe(&session, |this, _, cx| {
             this.mix(cx);
-            cx.notify();
         })
         .detach();
 
@@ -395,7 +394,11 @@ impl Home {
         if !ready {
             return;
         }
-        self.picks = picks(&self.library, shelf, self.picks_seed, cx);
+        let new_picks = picks(&self.library, shelf, self.picks_seed, cx);
+        if self.picks == new_picks {
+            return;
+        }
+        self.picks = new_picks;
         self.merge();
         cx.notify();
     }
