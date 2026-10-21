@@ -4,16 +4,17 @@
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, Div, ElementId, Entity, EntityId, MouseButton, MouseDownEvent,
-    MouseMoveEvent, Pixels, Point, ScrollHandle, ScrollWheelEvent, SharedString,
-    WeakEntity, Window, div, point, px, svg,
+    AnyElement, App, Context, Div, ElementId, Entity, EntityId, Pixels, Point, ScrollHandle,
+    ScrollWheelEvent, SharedString, WeakEntity, Window, div, point, px, svg,
 };
-use std::cell::Cell;
 use std::rc::Rc;
 
 use music::{GenreItem, GenreSection};
 use state::Playback;
-use ui::{ActiveTheme as _, Button, Card, Deck, Glide, Mode, Skeleton, Text, heading, snapped};
+use ui::{
+    ActiveTheme as _, Button, Card, Deck, Glide, Mode, Skeleton, Text, heading, shelf_scroll,
+    snapped,
+};
 
 use crate::shared::album_grid::CardGrid;
 use crate::shared::cards;
@@ -29,14 +30,12 @@ const LANE_GAP: Pixels = px(8.);
 const HEADING_GAP: Pixels = px(12.);
 const LEADING: f32 = 1.4;
 const HEADING: Pixels = px(140.);
-const DRAG_THRESHOLD: Pixels = px(6.);
 
 pub(crate) struct Shelves {
     id: &'static str,
     host: EntityId,
     playback: Entity<Playback>,
     rails: Vec<(ScrollHandle, Glide)>,
-    rail_drags: Vec<Rc<Cell<Option<(Point<Pixels>, Point<Pixels>)>>>>,
 }
 
 impl Shelves {
@@ -46,7 +45,6 @@ impl Shelves {
             host,
             playback,
             rails: Vec::new(),
-            rail_drags: Vec::new(),
         }
     }
 
@@ -97,7 +95,6 @@ impl Shelves {
             let mut glide = Glide::default();
             glide.watch(self.host);
             self.rails.push((ScrollHandle::new(), glide));
-            self.rail_drags.push(Rc::new(Cell::new(None)));
         }
         for (scroll, glide) in &self.rails {
             glide.sync(scroll);
@@ -200,7 +197,6 @@ impl Shelves {
         };
         let layout = CardGrid::layout(width);
         let (handle, glide) = self.rails[place].clone();
-        let drag = self.rail_drags[place].clone();
         let crowded = section.items.len() > layout.columns;
         let feed = sections.clone();
         let drawn = me.clone();
@@ -230,7 +226,7 @@ impl Shelves {
                         this.child(self.arrows(place, &handle, &glide, me))
                     }),
             )
-            .child(
+            .child(shelf_scroll(
                 div()
                     .id((self.id, place))
                     .w_full()
@@ -247,34 +243,6 @@ impl Shelves {
                             }
                             glide.nudge(&scroll, window);
                         }
-                    })
-                    .on_mouse_down(MouseButton::Left, {
-                        let drag = drag.clone();
-                        move |event: &MouseDownEvent, _, cx| {
-                            drag.set(Some((event.position, event.position)));
-                        }
-                    })
-                    .on_mouse_move({
-                        let drag = drag.clone();
-                        let scroll = handle.clone();
-                        move |event: &MouseMoveEvent, _, _| {
-                            let Some((origin, previous)) = drag.get() else {
-                                return;
-                            };
-                            let moved = event.position.x - origin.x;
-                            if moved.abs() >= DRAG_THRESHOLD {
-                                drag.set(Some((origin, event.position)));
-                                scroll.set_offset(point(
-                                    (scroll.offset().x + event.position.x - previous.x)
-                                        .clamp(-scroll.max_offset().x, Pixels::ZERO),
-                                    scroll.offset().y,
-                                ));
-                            }
-                        }
-                    })
-                    .on_mouse_up_out(MouseButton::Left, {
-                        let drag = drag.clone();
-                        move |_, _, _| drag.set(None)
                     })
                     .child(
                         Deck::new(self.tag("rail", place))
@@ -295,7 +263,9 @@ impl Shelves {
                                     .card(place * 100 + index, item, Some(card), cx)
                             }),
                     ),
-            )
+                &handle,
+                &glide,
+            ))
             .into_any_element()
     }
 
@@ -539,7 +509,7 @@ impl Rail {
                     .children(arrows),
             )
             .children(tabs)
-            .child(
+            .child(shelf_scroll(
                 div()
                     .id((tag, place))
                     .w_full()
@@ -560,7 +530,9 @@ impl Rail {
                             .gap(RAIL_GAP)
                             .draw(draw),
                     ),
-            )
+                &self.scroll,
+                &self.glide,
+            ))
             .into_any_element()
     }
 

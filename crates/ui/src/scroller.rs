@@ -1,11 +1,17 @@
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::Instant;
+
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Div, ElementId, Entity, Interactivity, MouseButton, MouseMoveEvent, Pixels,
-    ScrollWheelEvent, StyleRefinement, Window, div, px,
+    AnyElement, App, Div, ElementId, Entity, Interactivity, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, ScrollWheelEvent, StyleRefinement,
+    Window, div, point, px,
 };
 
 use crate::button::Button;
 use crate::glass::{blurring, glass};
+use crate::glide::Glide;
 use crate::scrollbar::{Scrollbar, activate_middle_scroll, cancel_middle_scroll};
 use crate::theme::ActiveTheme as _;
 
@@ -159,6 +165,54 @@ pub fn middle_scroll(surface: Div, bar: &Entity<Scrollbar>) -> Div {
                     bar.middle_scroll_move(event.position, window, cx)
                 });
             }
+        })
+}
+
+pub fn shelf_scroll(surface: Div, scroll: &ScrollHandle, glide: &Glide) -> Div {
+    let drag = Rc::new(Cell::new(None));
+    let drag_down = drag.clone();
+    let drag_move = drag.clone();
+    let drag_up = drag.clone();
+    let drag_up_out = drag.clone();
+    let scroll_move = scroll.clone();
+    let scroll_up = scroll.clone();
+    let glide_up = glide.clone();
+
+    surface
+        .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _, _| {
+            drag_down.set(Some((event.position, event.position, Instant::now())));
+        })
+        .on_mouse_move(move |event: &MouseMoveEvent, _, _| {
+            let Some((origin, previous, start_time)) = drag_move.get() else {
+                return;
+            };
+            let moved = event.position.x - origin.x;
+            if moved.abs() >= px(6.) {
+                drag_move.set(Some((origin, event.position, start_time)));
+                scroll_move.set_offset(point(
+                    (scroll_move.offset().x + event.position.x - previous.x)
+                        .clamp(-scroll_move.max_offset().x, Pixels::ZERO),
+                    scroll_move.offset().y,
+                ));
+            }
+        })
+        .on_mouse_up(MouseButton::Left, move |event: &MouseUpEvent, window, _| {
+            if let Some((origin, previous, start_time)) = drag_up.take() {
+                let moved = event.position.x - origin.x;
+                if moved.abs() >= px(6.) {
+                    let elapsed = start_time.elapsed().as_secs_f32().max(0.016);
+                    let velocity = (event.position.x - previous.x).0 / elapsed;
+                    if velocity.abs() > 80.0 {
+                        let impulse = px(velocity * 0.18);
+                        let target = (scroll_up.offset().x + impulse)
+                            .clamp(-scroll_up.max_offset().x, Pixels::ZERO);
+                        glide_up.aim(&scroll_up, point(target, scroll_up.offset().y), window);
+                    }
+                }
+            }
+        })
+        .on_mouse_up_out(MouseButton::Left, move |_, _, _| {
+            drag_up_out.set(None);
         })
 }
 

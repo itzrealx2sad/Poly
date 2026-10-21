@@ -315,8 +315,8 @@ struct ArtworkCache {
     /// The palette of every cover decoded this run, kept apart from the frames
     /// so an eviction never costs a button its colour.
     tints: HashMap<Resource, CoverPalette>,
+    palette_tasks: HashMap<SharedString, Task<CoverPalette>>,
     bytes: usize,
-    /// The size in bytes of the largest window a cover was drawn in, which sets the budget.
     screen: usize,
     _sweep: Task<()>,
 }
@@ -336,6 +336,7 @@ impl ArtworkCache {
                 pending: HashMap::new(),
                 soft: HashMap::new(),
                 tints: HashMap::new(),
+                palette_tasks: HashMap::new(),
                 bytes: 0,
                 screen: 0,
                 _sweep: sweeper(cx),
@@ -351,11 +352,12 @@ impl ArtworkCache {
         decoded: Result<Decoded, ImageCacheError>,
         cx: &mut App,
     ) {
-        if let Ok(decoded) = &decoded
-            && !self.tints.contains_key(&resource.0)
-        {
-            self.trim_tints();
-            self.tints.insert(resource.0.clone(), decoded.palette);
+        if let Ok(decoded) = &decoded {
+            let canonical = canonical_resource(&resource.0);
+            if !self.tints.contains_key(&canonical) {
+                self.trim_tints();
+                self.tints.insert(canonical, decoded.palette);
+            }
         }
         let value = decoded.map(|decoded| decoded.image);
         let bytes = value.as_ref().map_or(0, |image| image_bytes(image));
@@ -540,6 +542,8 @@ impl ArtworkCache {
             cx.refresh_windows();
         }
 
+        self.palette_tasks.retain(|_, task| !task.is_finished());
+
         let tiny = self.count(..SMALL_BYTES);
         let small = self.count(SMALL_BYTES..BIG_BYTES);
         let big = self.count(BIG_BYTES..);
@@ -666,11 +670,14 @@ impl ArtworkCache {
     /// draw while the one at `edge` loads. A resize that moves a cover to the next edge step
     /// keeps it on screen instead of flashing the skeleton.
     fn stand_in(&mut self, resource: &Resource, edge: u32) -> Option<Arc<RenderImage>> {
+        let canonical = canonical_resource(resource);
         let (_, cached) = self
             .items
             .iter_mut()
             .filter(|((held, size), cached)| {
-                held == resource && *size >= edge / 2 && cached.value.is_ok()
+                (held == resource || canonical_resource(held) == canonical)
+                    && *size > 0
+                    && cached.value.is_ok()
             })
             .max_by_key(|((_, size), _)| *size)?;
         cached.used = Instant::now();
@@ -707,58 +714,114 @@ fn blurred(image: &RenderImage) -> Option<Arc<RenderImage>> {
 /// `EDGE_STEP`, so nearby sizes share one decode, and never past `MAX_SAMPLE_EDGE`.
 fn sample_edge(size: Pixels, window: &Window) -> u32 {
     let scale = window.scale_factor().max(1.0);
-    let physical = ((size / px(1.)) * scale * 1.5).ceil().max(1.) as u32;
+    let physical = ((size / px(1.)) * scale).ceil().max(1.) as u32;
     physical.next_multiple_of(EDGE_STEP).min(MAX_SAMPLE_EDGE)
 }
 
-fn optimize_artwork_url(url: &str) -> String {
+fn optimize_artwork_url(url: &str, edge: u32) -> String {
     if url.contains("i.scdn.co/image/ab67") {
-        url.replace("00004851", "0000b273")
-            .replace("00001e02", "0000b273")
+        if edge > 0 && edge <= 64 {
+            url.replace("0000b273", "00004851").replace("00001e02", "00004851")
+        } else if edge > 0 && edge <= 300 {
+            url.replace("0000b273", "00001e02").replace("00004851", "00001e02")
+        } else {
+            url.replace("00004851", "0000b273").replace("00001e02", "0000b273")
+        }
+    } else if url.contains("mzstatic.com") {
+        let dim = match edge {
+            0 => 600,
+            e if e <= 100 => 100,
+            e if e <= 300 => 300,
+            e if e <= 600 => 600,
+            _ => 1000,
+        };
+        let target = format!("{dim}x{dim}");
+        if url.contains("{w}x{h}") {
+            url.replace("{w}x{h}", &target)
+        } else if url.contains("/100x100") && dim != 100 {
+            url.replace("/100x100", &format!("/{target}"))
+        } else if url.contains("/600x600") && dim != 600 {
+            url.replace("/600x600", &format!("/{target}"))
+        } else {
+            url.to_owned()
+        }
     } else {
         url.to_owned()
     }
 }
 
+fn canonical_resource(resource: &Resource) -> Resource {
+    match resource {
+        Resource::Uri(uri) => {
+            let s = uri.as_ref();
+            if s.contains("i.scdn.co/image/ab67") {
+                Resource::Uri(SharedUri::from(
+                    s.replace("00004851", "0000b273").replace("00001e02", "0000b273"),
+                ))
+            } else if s.contains("mzstatic.com") {
+                Resource::Uri(SharedUri::from(
+                    s.replace("/100x100", "/600x600")
+                        .replace("/300x300", "/600x600")
+                        .replace("/1000x1000", "/600x600"),
+                ))
+            } else {
+                resource.clone()
+            }
+        }
+        _ => resource.clone(),
+    }
+}
+
 pub(crate) fn resource(url: impl Into<SharedString>) -> Resource {
+    resource_at(url, 0)
+}
+
+pub(crate) fn resource_at(url: impl Into<SharedString>, edge: u32) -> Resource {
     let url = url.into();
-    let optimized = optimize_artwork_url(url.as_ref());
+    let optimized = optimize_artwork_url(url.as_ref(), edge);
     match optimized.strip_prefix(FILE_PREFIX) {
         Some(path) => Resource::Path(Arc::from(Path::new(path))),
         None => Resource::Uri(SharedUri::from(optimized)),
     }
 }
 
-/// The palette of a cover the artwork cache has already decoded, or none while
-/// it has not been drawn yet. Nothing is decoded here, so the colours land on
-/// the frame the cover appears and never before it.
 pub fn cover_palette(url: &str, cx: &App) -> Option<CoverPalette> {
     let installed = cx.try_global::<Installed>()?;
+    let cache = installed.0.read(cx);
     let resource = resource(url.to_owned());
-
-    installed.0.read(cx).tints.get(&resource).copied()
+    if let Some(pal) = cache.tints.get(&resource).copied() {
+        return Some(pal);
+    }
+    let canonical = canonical_resource(&resource);
+    cache.tints.get(&canonical).copied()
 }
 
-/// The palette of the cover at `url` without keeping its pixels. A cover the cache has
-/// drawn answers from its stored palette, and any other is decoded at `PALETTE_EDGE`,
-/// which is plenty for a hue count and costs a fraction of the full-size frame.
 pub(crate) fn sample_palette(url: SharedString, cx: &mut App) -> Task<CoverPalette> {
     if let Some(palette) = cover_palette(&url, cx) {
         return Task::ready(palette);
     }
+    let cache = ArtworkCache::entity(cx);
+    if let Some(task) = cache.read(cx).palette_tasks.get(&url) {
+        return task.clone();
+    }
+    let res = resource_at(url.clone(), PALETTE_EDGE);
     let load = ArtworkAssetLoader::load(
         ArtworkSource {
-            resource: resource(url),
+            resource: res,
             edge: PALETTE_EDGE,
         },
         cx,
     );
-
-    cx.background_spawn(async move {
+    let url_key = url.clone();
+    let task = cx.background_spawn(async move {
         load.await
             .map(|decoded| decoded.palette)
             .unwrap_or_default()
-    })
+    });
+    cache.update(cx, |cache, _| {
+        cache.palette_tasks.insert(url_key, task.clone());
+    });
+    task
 }
 
 pub fn artwork_usage(cx: &App) -> Option<(usize, usize)> {
@@ -915,8 +978,8 @@ impl RenderOnce for Artwork {
         match url {
             Some(url) => {
                 let cache = ArtworkCache::entity(cx);
-                let resource = resource(url);
                 let edge = sample_edge(size, window);
+                let resource = resource_at(url, edge);
                 let source = ImageSource::Custom(Arc::new({
                     let cache = cache.clone();
                     move |window, cx| {
