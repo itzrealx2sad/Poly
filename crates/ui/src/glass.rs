@@ -8,7 +8,7 @@ use gpui::{App, Pixels, px};
 use crate::theme::ActiveTheme as _;
 
 /// How much of the popover colour a glass control keeps over what it blurs.
-pub const GLASS_FILL: f32 = 0.58;
+pub const GLASS_FILL: f32 = 0.72;
 /// How hard a glass control blurs what is behind it.
 pub const GLASS_BLUR: Pixels = px(28.);
 
