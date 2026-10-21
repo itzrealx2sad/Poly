@@ -13,7 +13,7 @@ use gpui::{App, Context, Entity, EventEmitter, SharedString, Task};
 use music::equalizer::{Equalizer, Gains};
 use music::{
     MusicApi, PlaybackConfig, PlaybackEvent as BackendEvent, PlaybackEvents, PlaybackFactory,
-    Player, Spectrum, Track,
+    Player, Spectrum, StreamQuality, Track,
 };
 use ui::{Pin, PinKind};
 
@@ -2393,14 +2393,30 @@ impl Playback {
         }
     }
 
-    /// Builds the streaming engine and starts pumping its events.
+    pub fn reload_engine(&mut self, cx: &mut Context<Self>) {
+        if let Some(playback) = self.session.read(cx).playback() {
+            self.rebind(playback, cx);
+        }
+    }
+
     fn start_engine(&mut self, playback: Arc<dyn PlaybackFactory>, cx: &mut Context<Self>) {
+        let provider = self.session.read(cx).provider_slug();
+        let settings = self.settings.read(cx);
+        let (quality_str, spatial_audio) = match provider {
+            Some("spotify") => (settings.spotify_quality(), false),
+            Some("apple") => (settings.apple_quality(), settings.apple_spatial_audio()),
+            Some("youtube") => (settings.youtube_quality(), false),
+            _ => ("high", false),
+        };
+        let quality = StreamQuality::from_id(quality_str);
         let config = PlaybackConfig {
             normalisation: self.normalisation,
             gapless: self.gapless,
             position_interval: POSITION_INTERVAL,
             gain: gain(self.level),
             equalizer: self.equalizer.clone(),
+            quality,
+            spatial_audio,
         };
         let (engine, events) = playback.start(config);
 
@@ -2424,6 +2440,8 @@ impl Playback {
             position_interval: POSITION_INTERVAL,
             gain: gain(self.level),
             equalizer: self.equalizer.clone(),
+            quality: StreamQuality::Lossless,
+            spatial_audio: false,
         };
         let (engine, events) = playback.start(config);
 

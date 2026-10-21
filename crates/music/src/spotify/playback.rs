@@ -19,7 +19,7 @@ use crate::spectrum::Spectrum;
 use crate::spotify::sink::{OutputSink, TransitionSignal, TransitionSync};
 use crate::{
     PlaybackConfig, PlaybackEvent, PlaybackEvents, PlaybackFactory, Player as MusicPlayer,
-    TransitionConfig,
+    StreamQuality, TransitionConfig,
 };
 
 const TRACK_PREFIX: &str = "spotify:track:";
@@ -175,8 +175,14 @@ impl Engine {
         let volume = Volume::new(config.gain);
         let spectrum = Spectrum::new();
 
+        let bitrate = match config.quality {
+            StreamQuality::Low => Bitrate::Bitrate96,
+            StreamQuality::Medium => Bitrate::Bitrate160,
+            StreamQuality::High | StreamQuality::Lossless => Bitrate::Bitrate320,
+        };
+
         let player_config = PlayerConfig {
-            bitrate: Bitrate::Bitrate320,
+            bitrate,
             normalisation: config.normalisation,
             gapless: config.gapless,
             position_update_interval: Some(config.position_interval),

@@ -576,15 +576,53 @@ pub enum PinTargetKind {
     Folder,
 }
 
-/// How a provider answered a pin change. `LimitReached` means it turned the pin away for
-/// holding too many already, and `Outside` that it can only pin what is in the listener's
-/// library. Either way the pin stays a local one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PinOutcome {
     Updated,
     LimitReached,
     Outside,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum StreamQuality {
+    Low,
+    Medium,
+    #[default]
+    High,
+    Lossless,
+}
+
+impl StreamQuality {
+    pub const ALL: [Self; 4] = [Self::Low, Self::Medium, Self::High, Self::Lossless];
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Lossless => "lossless",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Low => "Low",
+            Self::Medium => "Normal",
+            Self::High => "High",
+            Self::Lossless => "Hi-Res Lossless",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Self {
+        match id {
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "lossless" => Self::Lossless,
+            _ => Self::High,
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

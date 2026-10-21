@@ -52,8 +52,8 @@ pub use models::{
     Album, AlbumCatalogue, AlbumDetail, Artist, ArtistCatalogue, ArtistProfile, ArtistRef,
     Contributor, Credit, Genre, GenreDetail, GenreItem, GenreSection, HomeFeed, Lyrics, LyricsHit,
     LyricsLane, LyricsLine, LyricsQuery, LyricsWord, PinOutcome, PinTarget, PinTargetKind,
-    Playlist, PlaylistDetail, ReleaseType, RomanizedText, SavedArtist, Track, TrackKey, TrackTags,
-    UserDetail, UserProfile, Voice, WritingSystem,
+    Playlist, PlaylistDetail, ReleaseType, RomanizedText, SavedArtist, StreamQuality, Track,
+    TrackKey, TrackTags, UserDetail, UserProfile, Voice, WritingSystem,
 };
 pub use spectrum::Spectrum;
 pub use transition::TransitionConfig;
@@ -349,6 +349,8 @@ pub struct PlaybackConfig {
     pub position_interval: Duration,
     pub gain: f32,
     pub equalizer: Equalizer,
+    pub quality: StreamQuality,
+    pub spatial_audio: bool,
 }
 
 /// What an engine reports back. `Playing` and `Seeked` mean audio from `at` is reaching the

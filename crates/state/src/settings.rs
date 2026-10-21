@@ -337,6 +337,10 @@ struct Values {
     silenced_requirements: Vec<String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     scrobbling: BTreeMap<String, Account>,
+    spotify_quality: String,
+    apple_quality: String,
+    apple_spatial_audio: bool,
+    youtube_quality: String,
     appearance: Appearance,
 }
 
@@ -499,6 +503,10 @@ impl Default for Values {
             hidden_nav: Vec::new(),
             silenced_requirements: Vec::new(),
             scrobbling: BTreeMap::new(),
+            spotify_quality: "high".to_owned(),
+            apple_quality: "high".to_owned(),
+            apple_spatial_audio: false,
+            youtube_quality: "high".to_owned(),
             appearance: Appearance::default(),
         }
     }
@@ -793,6 +801,22 @@ impl AppSettings {
 
     pub fn crossfade_duration(&self) -> u32 {
         self.values.crossfade_duration.clamp(1, 12)
+    }
+
+    pub fn spotify_quality(&self) -> &str {
+        &self.values.spotify_quality
+    }
+
+    pub fn apple_quality(&self) -> &str {
+        &self.values.apple_quality
+    }
+
+    pub fn apple_spatial_audio(&self) -> bool {
+        self.values.apple_spatial_audio
+    }
+
+    pub fn youtube_quality(&self) -> &str {
+        &self.values.youtube_quality
     }
 
     pub fn equalizer(&self) -> bool {
@@ -1218,6 +1242,38 @@ impl AppSettings {
 
     pub fn set_crossfade_duration(&mut self, duration: u32, cx: &mut Context<Self>) {
         self.values.crossfade_duration = duration.clamp(1, 12);
+        self.schedule_save(cx);
+    }
+
+    pub fn set_spotify_quality(&mut self, quality: String, cx: &mut Context<Self>) {
+        if self.values.spotify_quality == quality {
+            return;
+        }
+        self.values.spotify_quality = quality;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_apple_quality(&mut self, quality: String, cx: &mut Context<Self>) {
+        if self.values.apple_quality == quality {
+            return;
+        }
+        self.values.apple_quality = quality;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_apple_spatial_audio(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.values.apple_spatial_audio == enabled {
+            return;
+        }
+        self.values.apple_spatial_audio = enabled;
+        self.schedule_save(cx);
+    }
+
+    pub fn set_youtube_quality(&mut self, quality: String, cx: &mut Context<Self>) {
+        if self.values.youtube_quality == quality {
+            return;
+        }
+        self.values.youtube_quality = quality;
         self.schedule_save(cx);
     }
 

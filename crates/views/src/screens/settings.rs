@@ -181,6 +181,10 @@ enum Slot {
     Crossfade,
     CrossfadeMode,
     CrossfadeDuration,
+    SpotifyQuality,
+    AppleQuality,
+    AppleSpatialAudio,
+    YouTubeQuality,
     Sleep,
     StayAwake,
     Widevine,
@@ -637,6 +641,11 @@ impl SettingsView {
                     }
                 }
                 slots.extend([
+                    Slot::Title("settings-group-quality"),
+                    Slot::SpotifyQuality,
+                    Slot::AppleQuality,
+                    Slot::AppleSpatialAudio,
+                    Slot::YouTubeQuality,
                     Slot::Sleep,
                     Slot::StayAwake,
                 ]);
@@ -807,6 +816,22 @@ impl SettingsView {
             Slot::CrossfadeDuration => (
                 t!("settings-crossfade-duration"),
                 t!("settings-crossfade-duration-detail"),
+            ),
+            Slot::SpotifyQuality => (
+                t!("settings-spotify-quality"),
+                t!("settings-spotify-quality-detail"),
+            ),
+            Slot::AppleQuality => (
+                t!("settings-apple-quality"),
+                t!("settings-apple-quality-detail"),
+            ),
+            Slot::AppleSpatialAudio => (
+                t!("settings-apple-spatial-audio"),
+                t!("settings-apple-spatial-audio-detail"),
+            ),
+            Slot::YouTubeQuality => (
+                t!("settings-youtube-quality"),
+                t!("settings-youtube-quality-detail"),
             ),
             Slot::Sleep => (t!("settings-sleep"), t!("settings-sleep-detail")),
             Slot::StayAwake => (t!("settings-stay-awake"), t!("settings-stay-awake-detail")),
@@ -1028,6 +1053,10 @@ impl SettingsView {
             Slot::Crossfade => self.crossfade_row(cx).element,
             Slot::CrossfadeMode => self.crossfade_mode_row(cx).element,
             Slot::CrossfadeDuration => self.crossfade_duration_row(cx).element,
+            Slot::SpotifyQuality => self.spotify_quality_row(cx).element,
+            Slot::AppleQuality => self.apple_quality_row(cx).element,
+            Slot::AppleSpatialAudio => self.apple_spatial_audio_row(cx).element,
+            Slot::YouTubeQuality => self.youtube_quality_row(cx).element,
             Slot::Sleep => self.sleep_row(cx).element,
             Slot::StayAwake => self.stay_awake_row(cx).element,
             Slot::Widevine => self.widevine_row(cx).element,
@@ -2424,6 +2453,210 @@ impl SettingsView {
             muted,
             small,
             control.into_any_element(),
+        )
+    }
+
+    fn spotify_quality_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let current = self.settings.read(cx).spotify_quality().to_owned();
+        let label = match current.as_str() {
+            "low" => "Low (96 kbps)",
+            "medium" => "Normal (160 kbps)",
+            _ => "High (320 kbps)",
+        };
+
+        let picker = Picker::new("spotify-quality", &self.popovers, label)
+            .width(Picker::NARROW)
+            .items([
+                MenuItem::new("spotify-quality-low", "Low (96 kbps)")
+                    .selected(current == "low")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_spotify_quality("low".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("spotify-quality-medium", "Normal (160 kbps)")
+                    .selected(current == "medium")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_spotify_quality("medium".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("spotify-quality-high", "High (320 kbps)")
+                    .selected(current != "low" && current != "medium")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_spotify_quality("high".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+            ]);
+
+        self.row(
+            t!("settings-spotify-quality"),
+            t!("settings-spotify-quality-detail"),
+            muted,
+            small,
+            picker.into_any_element(),
+        )
+    }
+
+    fn apple_quality_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let current = self.settings.read(cx).apple_quality().to_owned();
+        let label = match current.as_str() {
+            "low" => "Low",
+            "medium" => "Normal",
+            "lossless" => "Hi-Res Lossless",
+            _ => "High",
+        };
+
+        let picker = Picker::new("apple-quality", &self.popovers, label)
+            .width(Picker::NARROW)
+            .items([
+                MenuItem::new("apple-quality-low", "Low")
+                    .selected(current == "low")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_apple_quality("low".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("apple-quality-medium", "Normal")
+                    .selected(current == "medium")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_apple_quality("medium".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("apple-quality-high", "High")
+                    .selected(current == "high")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_apple_quality("high".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("apple-quality-lossless", "Hi-Res Lossless")
+                    .selected(current == "lossless")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_apple_quality("lossless".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+            ]);
+
+        self.row(
+            t!("settings-apple-quality"),
+            t!("settings-apple-quality-detail"),
+            muted,
+            small,
+            picker.into_any_element(),
+        )
+    }
+
+    fn apple_spatial_audio_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let on = self.settings.read(cx).apple_spatial_audio();
+
+        let switch = Switch::new("apple-spatial-audio", on)
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if on {
+                    this.settings.update(cx, |settings, cx| {
+                        settings.set_apple_spatial_audio(false, cx);
+                    });
+                    this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                } else {
+                    let settings = this.settings.clone();
+                    let playback = this.playback.clone();
+                    Confirm::ask(
+                        Kind::SpatialAudio,
+                        move |cx| {
+                            settings.update(cx, |settings, cx| {
+                                settings.set_apple_spatial_audio(true, cx);
+                            });
+                            playback.update(cx, |p, cx| p.reload_engine(cx));
+                        },
+                        cx,
+                    );
+                }
+            }));
+
+        self.row(
+            t!("settings-apple-spatial-audio"),
+            t!("settings-apple-spatial-audio-detail"),
+            muted,
+            small,
+            switch.into_any_element(),
+        )
+    }
+
+    fn youtube_quality_row(&self, cx: &mut Context<Self>) -> Setting {
+        let theme = *cx.theme();
+        let muted = theme.muted_foreground;
+        let small = theme.text(Text::Small);
+        let current = self.settings.read(cx).youtube_quality().to_owned();
+        let label = match current.as_str() {
+            "low" => "Low (48 kbps)",
+            "medium" => "Normal (128 kbps)",
+            _ => "High (256 kbps)",
+        };
+
+        let picker = Picker::new("youtube-quality", &self.popovers, label)
+            .width(Picker::NARROW)
+            .items([
+                MenuItem::new("youtube-quality-low", "Low (48 kbps)")
+                    .selected(current == "low")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_youtube_quality("low".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("youtube-quality-medium", "Normal (128 kbps)")
+                    .selected(current == "medium")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_youtube_quality("medium".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+                MenuItem::new("youtube-quality-high", "High (256 kbps)")
+                    .selected(current != "low" && current != "medium")
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_youtube_quality("high".to_owned(), cx);
+                        });
+                        this.playback.update(cx, |p, cx| p.reload_engine(cx));
+                        cx.notify();
+                    })),
+            ]);
+
+        self.row(
+            t!("settings-youtube-quality"),
+            t!("settings-youtube-quality-detail"),
+            muted,
+            small,
+            picker.into_any_element(),
         )
     }
 

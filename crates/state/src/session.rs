@@ -201,6 +201,10 @@ impl Session {
         self.playback.clone()
     }
 
+    pub fn provider_slug(&self) -> Option<&str> {
+        self.active.and_then(|index| self.providers.get(index)).map(|p| p.slug())
+    }
+
     pub fn local_client(&self) -> Option<Arc<dyn MusicApi>> {
         self.local_client.clone()
     }
