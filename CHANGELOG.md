@@ -7,8 +7,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Per-provider streaming quality controls for Spotify, Apple Music, and YouTube Music with automatic safe bitrate fallback.
+- Spatial audio toggle for Apple Music playback with hardware and output capability confirmation.
+- Sliding marquee animation for overflowing track titles in the player bar with smooth glide and rest cycles.
+- Lyric-aware search results matching against cached song lyrics alongside title and artist hits.
+- Left-button press-and-drag scrolling for horizontal shelves with flick inertia glide across the home screen.
+- Configurable sidebar navigation page visibility in Settings.
+- User account card displaying plan tier and active music provider beneath the profile display name.
+
+### Changed
+
+- Streamlined active streaming provider surface to Apple Music, Spotify, YouTube Music, and Guest.
+- Optimized artwork decode dimensions to match exact rendered element bounds and device scale, avoiding oversized memory decodes and deduplicating in-flight palette sampling.
+- Glass backdrop and composition refined for player dock and window control container with consistent theme-backed contrast.
+- Coalesced startup account restoration and deferred background library hydration to keep cached snapshots instantly responsive on first paint.
+
 ### Fixed
 
+- Prevented re-entrant RefCell borrow errors during window resizing and rapid inertia glide scrolling.
+- Guarded Spotify transport states to prevent issuing play commands to stopped or loading decks.
 - Spotify resume now ignores an active deck that is still waiting for fresh audio instead of sending it a play command while stopped.
 - Spotify resume and pause no longer send transport commands to the inactive stopped deck.
 - LrcLib transient service outages are retried without preventing other lyric providers from answering.
