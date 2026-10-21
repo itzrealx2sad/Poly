@@ -8,7 +8,7 @@ use ui::ActiveTheme as _;
 
 use gpui::prelude::*;
 use gpui::{
-    ClickEvent, Context, Entity, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent,
+    Animation, ClickEvent, Context, Entity, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, Window, div, px,
 };
 use i18n::t;
@@ -323,13 +323,56 @@ impl Render for PlayerBar {
                             .gap(px(8.))
                             .min_w_0()
                             .child(match track {
-                                Some(t) => div()
-                                    .id("now-playing-track")
-                                    .child(SharedString::from(t.name.clone()))
-                                    .text_size(theme.text(ui::Text::Body))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(theme.foreground)
-                                    .truncate(),
+                                Some(t) => {
+                                    let name_len = t.name.chars().count();
+                                    let reduce_motion = cx.reduce_motion();
+                                    if name_len > 22 && !reduce_motion {
+                                        let slide_distance =
+                                            px(((name_len - 20) as f32 * 8.5).min(280.));
+                                        div()
+                                            .id("now-playing-track-marquee-container")
+                                            .overflow_hidden()
+                                            .max_w(px(220.))
+                                            .child(
+                                                div()
+                                                    .id("now-playing-track")
+                                                    .flex()
+                                                    .whitespace_nowrap()
+                                                    .child(SharedString::from(t.name.clone()))
+                                                    .text_size(theme.text(ui::Text::Body))
+                                                    .font_weight(FontWeight::BOLD)
+                                                    .text_color(theme.foreground)
+                                                    .with_animation(
+                                                        ("track-marquee", SharedString::from(t.name.clone())),
+                                                        Animation::new(Duration::from_secs(10)).repeat(),
+                                                        move |this, delta| {
+                                                            let offset = if delta < 0.30 {
+                                                                Pixels::ZERO
+                                                            } else if delta < 0.70 {
+                                                                let progress = (delta - 0.30) / 0.40;
+                                                                let eased = (1.0 - (progress * std::f32::consts::PI).cos()) / 2.0;
+                                                                -slide_distance * eased
+                                                            } else if delta < 0.90 {
+                                                                -slide_distance
+                                                            } else {
+                                                                let progress = (delta - 0.90) / 0.10;
+                                                                let eased = (1.0 - (progress * std::f32::consts::PI).cos()) / 2.0;
+                                                                -slide_distance * (1.0 - eased)
+                                                            };
+                                                            this.ml(offset)
+                                                        },
+                                                    ),
+                                            )
+                                    } else {
+                                        div()
+                                            .id("now-playing-track")
+                                            .child(SharedString::from(t.name.clone()))
+                                            .text_size(theme.text(ui::Text::Body))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(theme.foreground)
+                                            .truncate()
+                                    }
+                                }
                                 None => div()
                                     .id("now-playing-idle")
                                     .child(t!("player-nothing-playing"))
