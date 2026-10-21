@@ -5701,6 +5701,49 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
+name = "poly"
+version = "0.43.0"
+dependencies = [
+ "anyhow",
+ "dirs",
+ "embed",
+ "env_logger",
+ "futures",
+ "gpui",
+ "gpui_platform",
+ "i18n",
+ "icons",
+ "image",
+ "input",
+ "interprocess",
+ "ksni",
+ "libc",
+ "log",
+ "music",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "reqwest 0.13.4",
+ "resvg",
+ "router",
+ "rustls 0.23.43",
+ "sha2",
+ "state",
+ "storage",
+ "tokio",
+ "tray-icon",
+ "ui",
+ "views",
+ "webview",
+ "widestring",
+ "windows 0.62.2",
+ "windows-sys 0.61.2",
+ "winresource",
+ "zbus",
+]
+
+[[package]]
 name = "polycool"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7388,49 +7431,6 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.60.2",
-]
-
-[[package]]
-name = "poly"
-version = "0.43.0"
-dependencies = [
- "anyhow",
- "dirs",
- "embed",
- "env_logger",
- "futures",
- "gpui",
- "gpui_platform",
- "i18n",
- "icons",
- "image",
- "input",
- "interprocess",
- "ksni",
- "libc",
- "log",
- "music",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "raw-window-handle",
- "reqwest 0.13.4",
- "resvg",
- "router",
- "rustls 0.23.43",
- "sha2",
- "state",
- "storage",
- "tokio",
- "tray-icon",
- "ui",
- "views",
- "webview",
- "widestring",
- "windows 0.62.2",
- "windows-sys 0.61.2",
- "winresource",
- "zbus",
 ]
 
 [[package]]
