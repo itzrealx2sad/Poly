@@ -73,6 +73,33 @@ impl MusicApi for YouTubeClient {
         Some(url)
     }
 
+    async fn is_premium(&self) -> bool {
+        if self.is_guest() {
+            return false;
+        }
+        if let Ok(response) = self.api.execute("account/account_menu", ytmusic::Client::Music, serde_json::json!({})).await {
+            let text = response.to_string();
+            if text.contains("unlimitedStatus")
+                || text.contains("MUSIC_PREMIUM_LOGO")
+                || text.contains("\"isPremium\":true")
+                || text.contains("\"tier\":\"PREMIUM\"")
+                || (text.contains("SPmemberships") && !text.contains("get_unlimited"))
+            {
+                return true;
+            }
+        }
+        if let Ok(response) = self.api.execute("browse", ytmusic::Client::Music, serde_json::json!({})).await {
+            let text = response.to_string();
+            if text.contains("MUSIC_PREMIUM_LOGO")
+                || text.contains("unlimitedStatus")
+                || text.contains("\"isPremium\":true")
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     async fn profile(&self) -> Result<UserProfile> {
         Ok(wire::profile(self.api.profile().await?))
     }

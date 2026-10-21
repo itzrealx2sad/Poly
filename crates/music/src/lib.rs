@@ -114,6 +114,10 @@ pub trait MusicApi: Send + Sync {
         false
     }
 
+    async fn is_premium(&self) -> bool {
+        false
+    }
+
     fn share_url(&self, kind: MediaKind, id: &str) -> Option<String>;
     async fn profile(&self) -> Result<UserProfile>;
 

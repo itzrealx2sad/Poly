@@ -5,7 +5,7 @@
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use gpui::Decorations;
 use gpui::prelude::*;
-use gpui::{AnyElement, Window, div, px};
+use gpui::{AnyElement, Window, div};
 use gpui::{
     AnyView, Context, Entity, EventEmitter, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Render,
@@ -290,7 +290,7 @@ impl Render for TitleBar {
                 this.child(
                     div()
                         .flex_none()
-                        .pr(px(14.))
+                        .pr_3()
                         .child(window_controls(false, traffic_light)),
                 )
             })

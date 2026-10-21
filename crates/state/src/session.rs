@@ -342,7 +342,7 @@ impl Session {
         if self.active == Some(index) && matches!(self.state, SessionState::SignedIn(_)) && !self.guest() {
             return;
         }
-        if self.active == Some(index) && self.guest() {
+        if self.providers[index].stored_guest() {
             self.providers[index].sign_out_guest();
         }
         self.release(cx);
@@ -721,6 +721,7 @@ impl Session {
         self.settings.update(cx, |settings, cx| {
             settings.set_provider(slug, cx);
         });
+        let api = session.api.clone();
         self.catalog = Some(Arc::new(CatalogSource::new(session.api.clone())));
         self.client = Some(session.api);
         self.playback = Some(session.playback);
@@ -730,6 +731,19 @@ impl Session {
         self.state = SessionState::SignedIn(session.profile);
         self.attempt = 0;
         self.start_heartbeat(cx);
+        if slug == "youtube" && self.authenticated {
+            let io = self.io.clone();
+            cx.spawn(async move |this, cx| {
+                let premium = io.spawn(async move { api.is_premium().await }).await.unwrap_or(false);
+                if premium {
+                    this.update(cx, |this, cx| {
+                        this.settings.update(cx, |settings, cx| {
+                            settings.set_youtube_premium(true, cx);
+                        });
+                    }).ok();
+                }
+            }).detach();
+        }
         cx.notify();
         cx.emit(SessionEvent::SignedIn);
     }

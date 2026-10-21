@@ -322,21 +322,27 @@ impl MusicProvider for YouTubeProvider {
     }
 
     async fn restore(&self) -> Result<Option<ProviderSession>> {
+        if self.stored() {
+            if let Some(Saved::Cookies {
+                cookies,
+                authuser,
+                page_id,
+            }) = self.saved()
+            {
+                if let Ok(Some(session)) = self
+                    .restore_cookies(&cookies, authuser, page_id.as_deref())
+                    .await
+                {
+                    self.sign_out_guest();
+                    return Ok(Some(session));
+                }
+            }
+        }
         if self.stored_guest() {
             log::debug!("youtube: restoring guest session");
             return Ok(Some(self.guest_session(self.guest_client())));
         }
-        match self.saved() {
-            Some(Saved::Cookies {
-                cookies,
-                authuser,
-                page_id,
-            }) => {
-                self.restore_cookies(&cookies, authuser, page_id.as_deref())
-                    .await
-            }
-            _ => Ok(None),
-        }
+        Ok(None)
     }
 
     async fn sign_in(

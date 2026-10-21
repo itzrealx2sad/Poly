@@ -18,10 +18,9 @@ const RETRY_DELAY: Duration = Duration::from_secs(3);
 const SWITCH_DEBOUNCE: Duration = Duration::from_secs(1);
 const MAX_START_DRIFT_SECONDS: u64 = 2;
 const MAX_TEXT_UTF16_UNITS: usize = 128;
-/// What the status says when it names the music rather than a service.
 const MUSIC: &str = "Music";
-/// Where the Poly button sends a friend who presses it.
-const POLY_URL: &str = "https://github.com/itzrealx2sad/Poly";
+const POLY_APP_NAME: &str = "Poly";
+const POLY_URL: &str = "https://github.com/itzrealx2sad/Poly/releases/latest";
 
 struct Attached {
     _discord: Entity<Discord>,
@@ -232,11 +231,11 @@ impl Discord {
         let named = provider.map(|provider| Source {
             badge: settings.discord_badge().then(|| provider.slug()),
             listening: match settings.discord_name() {
-                DiscordName::Sonora => None,
+                DiscordName::Sonora => Some(POLY_APP_NAME.to_owned()),
                 DiscordName::Provider => Some(provider.listening_to().to_owned()),
                 DiscordName::Music => Some(MUSIC.to_owned()),
-                DiscordName::Title => fit_text(&track.name).or_else(|| Some(MUSIC.to_owned())),
-                DiscordName::Artist => fit_text(&track.artists).or_else(|| Some(MUSIC.to_owned())),
+                DiscordName::Title => fit_text(&track.name).or_else(|| Some(POLY_APP_NAME.to_owned())),
+                DiscordName::Artist => fit_text(&track.artists).or_else(|| Some(POLY_APP_NAME.to_owned())),
                 DiscordName::ArtistTitle => {
                     let artists = track.artists.trim();
                     let title = track.name.trim();
@@ -244,7 +243,7 @@ impl Discord {
                         (false, false) => format!("{artists} - {title}"),
                         (false, true) => artists.to_owned(),
                         (true, false) => title.to_owned(),
-                        (true, true) => MUSIC.to_owned(),
+                        (true, true) => POLY_APP_NAME.to_owned(),
                     })
                 }
             },
@@ -451,16 +450,15 @@ fn activity(shown: &Shown) -> Option<activity::Activity<'_>> {
         return None;
     };
 
-    let mut activity = activity::Activity::new()
-        .activity_type(activity::ActivityType::Listening)
-        .details(presence.details.as_str());
-    if let Some(listening) = presence
+    let listening = presence
         .source
         .as_ref()
         .and_then(|source| source.listening.as_deref())
-    {
-        activity = activity.name(listening);
-    }
+        .unwrap_or(POLY_APP_NAME);
+    let mut activity = activity::Activity::new()
+        .activity_type(activity::ActivityType::Listening)
+        .name(listening)
+        .details(presence.details.as_str());
     if let Some(state) = presence.state.as_deref() {
         activity = activity.state(state);
     }
@@ -535,7 +533,7 @@ fn buttons(
     }
     if settings.discord_sonora_button() {
         buttons.push(Button {
-            label: "Get Poly".to_string(),
+            label: "Download Poly".to_string(),
             url: POLY_URL.to_string(),
         });
     }

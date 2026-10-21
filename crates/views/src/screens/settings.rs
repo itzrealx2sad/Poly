@@ -3883,7 +3883,7 @@ impl SettingsView {
                 name: info.name,
                 options: info.options,
                 web_sign_in: info.web_sign_in,
-                stored: info.stored && !info.guest,
+                stored: info.stored,
                 // a session on its way up reports no account yet, so while it loads the card
                 // it belongs to keeps the radio rather than leaving the list blank
                 active: match chosen {
