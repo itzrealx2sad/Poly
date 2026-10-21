@@ -333,13 +333,6 @@ impl Render for PlayerBar {
                                             .collect(),
                                     };
                                     let full_key = format!("{} {}", t.name, t.artists);
-                                    let text_len = t.name.chars().count() + t.artists.chars().count() + 1;
-                                    let chars_limit = match span {
-                                        Room::Tight | Room::Snug => 18,
-                                        Room::Roomy => 24,
-                                        Room::Wide => 32,
-                                        Room::Vast => 42,
-                                    };
                                     let max_width_f32 = match span {
                                         Room::Tight | Room::Snug => 200.,
                                         Room::Roomy => 260.,
@@ -348,11 +341,20 @@ impl Render for PlayerBar {
                                     };
                                     let max_width = px(max_width_f32);
 
-                                    let is_long = text_len > chars_limit;
-                                    let estimated_width = (t.name.chars().count() as f32 * 8.5)
-                                        + (t.artists.chars().count() as f32 * 7.5)
-                                        + 24.0;
-                                    let slide_distance = (estimated_width - max_width_f32 + 16.0).max(40.0);
+                                    let name_width: f32 = t
+                                        .name
+                                        .chars()
+                                        .map(|c| if c.is_ascii() { 8.5 } else { 14.5 })
+                                        .sum();
+                                    let artists_width: f32 = t
+                                        .artists
+                                        .chars()
+                                        .map(|c| if c.is_ascii() { 7.5 } else { 13.5 })
+                                        .sum();
+                                    let unit_width = (name_width + 8.0 + artists_width + 16.0).max(160.0);
+                                    let is_long = unit_width > max_width_f32;
+                                    let gap = 56.0;
+                                    let total_span = unit_width + gap;
                                     let mut offset = Pixels::ZERO;
 
                                     if is_long {
@@ -368,8 +370,8 @@ impl Render for PlayerBar {
                                         let elapsed = now.duration_since(start).as_secs_f32();
                                         let pause_duration = 5.0;
                                         let speed = 28.0;
-                                        let slide_duration = (slide_distance / speed).max(2.0);
-                                        let cycle_duration = pause_duration * 2.0 + slide_duration * 2.0;
+                                        let slide_duration = (total_span / speed).max(4.0);
+                                        let cycle_duration = pause_duration + slide_duration;
                                         let cycle = elapsed % cycle_duration;
 
                                         if cycle < pause_duration {
@@ -386,34 +388,11 @@ impl Render for PlayerBar {
                                                     });
                                                 }));
                                             }
-                                        } else if cycle < pause_duration + slide_duration {
+                                        } else {
                                             self.marquee_task = None;
                                             let progress = ((cycle - pause_duration) / slide_duration)
                                                 .clamp(0.0, 1.0);
-                                            offset = -px(slide_distance * progress);
-                                            window.request_animation_frame();
-                                        } else if cycle < pause_duration * 2.0 + slide_duration {
-                                            offset = -px(slide_distance);
-                                            if self.marquee_task.is_none() {
-                                                let delay = Duration::from_secs_f32(
-                                                    ((pause_duration * 2.0 + slide_duration) - cycle)
-                                                        .max(0.02)
-                                                        + 0.02,
-                                                );
-                                                self.marquee_task = Some(cx.spawn(async move |this, cx| {
-                                                    cx.background_executor().timer(delay).await;
-                                                    let _ = this.update(cx, |this, cx| {
-                                                        this.marquee_task = None;
-                                                        cx.notify();
-                                                    });
-                                                }));
-                                            }
-                                        } else {
-                                            self.marquee_task = None;
-                                            let progress = ((cycle - (pause_duration * 2.0 + slide_duration))
-                                                / slide_duration)
-                                                .clamp(0.0, 1.0);
-                                            offset = -px(slide_distance * (1.0 - progress));
+                                            offset = -px(total_span * progress);
                                             window.request_animation_frame();
                                         }
                                     } else {
@@ -451,6 +430,8 @@ impl Render for PlayerBar {
 
                                         div()
                                             .flex()
+                                            .flex_none()
+                                            .w(px(unit_width))
                                             .items_center()
                                             .gap_2()
                                             .whitespace_nowrap()
@@ -464,13 +445,25 @@ impl Render for PlayerBar {
                                             .child(authors_row)
                                     };
 
-                                    let content = div()
-                                        .id("now-playing-track-content")
-                                        .flex()
-                                        .items_center()
-                                        .whitespace_nowrap()
-                                        .when(is_long, |this| this.relative().left(offset))
-                                        .child(make_unit("now-playing-author"));
+                                    let content = if is_long {
+                                        div()
+                                            .id("now-playing-track-content")
+                                            .flex()
+                                            .items_center()
+                                            .gap(px(gap))
+                                            .whitespace_nowrap()
+                                            .relative()
+                                            .left(offset)
+                                            .child(make_unit("np-a"))
+                                            .child(make_unit("np-b"))
+                                    } else {
+                                        div()
+                                            .id("now-playing-track-content")
+                                            .flex()
+                                            .items_center()
+                                            .whitespace_nowrap()
+                                            .child(make_unit("np-a"))
+                                    };
 
                                     div()
                                         .id("now-playing-track-marquee-container")
