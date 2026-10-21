@@ -72,6 +72,8 @@ The following primary architectural enhancements and features were introduced in
 - `crates/views/src/screens/home/curated.rs` - Curated home recommendations and section models.
 - `build-fast.bat` - Optimized Windows build script.
 - `assets/icons/lucide/poly-logo.svg` - Poly brand vector icon.
+- `assets/poly-logo.svg` - Poly brand white wordmark vector logo (P logo with "oly").
+- `assets/poly-logo-dark.svg` - Poly brand dark wordmark vector logo for light themes.
 - `assets/icons/lucide/flame.svg` - Trending indicator icon.
 - `assets/icons/lucide/sparkles.svg` - Curated / AI recommendation icon.
 - `assets/icons/lucide/trending-up.svg` - Charts indicator icon.

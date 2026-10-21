@@ -1,6 +1,10 @@
 <div align="center">
 
-<img src="./assets/icons/lucide/poly-logo.svg" alt="Poly Logo" width="72" height="72">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./assets/poly-logo.svg">
+  <source media="(prefers-color-scheme: light)" srcset="./assets/poly-logo-dark.svg">
+  <img src="./assets/poly-logo.svg" alt="Poly Logo" height="80">
+</picture>
 
 # Poly Windows
 
