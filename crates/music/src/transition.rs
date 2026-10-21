@@ -900,6 +900,90 @@ impl StreamResampler {
     }
 }
 
+/// The adaptive parameters used to render one overlap between two decks.
+#[derive(Clone, Copy, Debug)]
+pub struct TransitionPlan {
+    pub swap_center: f32,
+    pub outgoing_level: f32,
+    pub incoming_level: f32,
+    pub compatibility: f32,
+}
+
+impl TransitionPlan {
+    /// Creates a neutral plan when track analysis is unavailable or unsuitable.
+    pub fn fallback(swap_center: f32) -> Self {
+        Self {
+            swap_center,
+            outgoing_level: 1.0,
+            incoming_level: 1.0,
+            compatibility: 0.5,
+        }
+    }
+}
+
+/// Maintains bounded audio observations for an adaptive overlap.
+#[derive(Clone, Copy)]
+struct TransitionPlanner {
+    incoming_beats: BeatAccentDetector,
+    outgoing_envelope: EnvelopeFollower,
+    incoming_envelope: EnvelopeFollower,
+    swap_center: f32,
+    compatibility: f32,
+}
+
+impl TransitionPlanner {
+    fn new(sample_rate: u32) -> Self {
+        Self {
+            incoming_beats: BeatAccentDetector::new(sample_rate),
+            outgoing_envelope: EnvelopeFollower::default(),
+            incoming_envelope: EnvelopeFollower::default(),
+            swap_center: 0.5,
+            compatibility: 0.5,
+        }
+    }
+
+    fn update(
+        &mut self,
+        outgoing: &[f32],
+        incoming: &[f32],
+        channels: usize,
+        progress: f32,
+    ) -> TransitionPlan {
+        self.outgoing_envelope.observe_block(outgoing, channels);
+        self.incoming_envelope.observe_block(incoming, channels);
+        let beat_center = self
+            .incoming_beats
+            .observe_block(incoming, channels, progress);
+        let outgoing_level = self.outgoing_envelope.rms();
+        let incoming_level = self.incoming_envelope.rms();
+        let total = outgoing_level + incoming_level;
+        let balance = if total > 0.0001 {
+            incoming_level / total
+        } else {
+            0.5
+        };
+        let energy_match = 1.0 - ((outgoing_level - incoming_level).abs() / total.max(0.0001));
+        let preferred_center = if self.outgoing_envelope.is_fading_out() {
+            (beat_center + 0.08).clamp(0.42, 0.72)
+        } else if incoming_level < outgoing_level * 0.35 {
+            (beat_center - 0.08).clamp(0.32, 0.58)
+        } else {
+            beat_center
+        };
+        self.swap_center = CurveMath::lerp(self.swap_center, preferred_center, 0.18);
+        self.compatibility = CurveMath::lerp(self.compatibility, energy_match, 0.16);
+        let base_level = 0.86 + 0.10 * self.compatibility;
+        let outgoing_level = base_level * (0.84 + 0.16 * (1.0 - balance));
+        let incoming_level = base_level * (0.84 + 0.16 * balance);
+        TransitionPlan {
+            swap_center: self.swap_center,
+            outgoing_level,
+            incoming_level,
+            compatibility: self.compatibility,
+        }
+    }
+}
+
 pub struct DualStreamMixer {
     channels: usize,
     total_frames: usize,
@@ -907,8 +991,7 @@ pub struct DualStreamMixer {
     is_automix: bool,
     out_deck: ThreeBandDeck,
     in_deck: ThreeBandDeck,
-    out_env: EnvelopeFollower,
-    beat_detector: BeatAccentDetector,
+    planner: TransitionPlanner,
 }
 
 impl DualStreamMixer {
@@ -922,8 +1005,7 @@ impl DualStreamMixer {
             is_automix,
             out_deck: ThreeBandDeck::new(rate),
             in_deck: ThreeBandDeck::new(rate),
-            out_env: EnvelopeFollower::default(),
-            beat_detector: BeatAccentDetector::new(rate),
+            planner: TransitionPlanner::new(rate),
         }
     }
 
@@ -939,23 +1021,27 @@ impl DualStreamMixer {
         }
         let in_frames = in_samples.len() / ch;
         let mix_frames = frames.min(in_frames);
-        self.out_env.observe(out_samples);
         let inv_total = 1.0 / self.total_frames.max(1) as f32;
         let p0 = (self.done_frames as f32 * inv_total).clamp(0.0, 1.0);
         let p1 = ((self.done_frames + mix_frames) as f32 * inv_total).clamp(0.0, 1.0);
-        let swap_center = if self.is_automix {
-            self.beat_detector.observe_block(in_samples, ch, 0.5 * (p0 + p1))
+        let plan = if self.is_automix {
+            self.planner
+                .update(out_samples, in_samples, ch, 0.5 * (p0 + p1))
         } else {
-            0.50
+            TransitionPlan::fallback(0.5)
         };
-        let assist0 = self.out_env.silence_assist(p0);
-        let assist1 = self.out_env.silence_assist(p1);
+        let assist0 = self.planner.outgoing_envelope.silence_assist(p0);
+        let assist1 = self.planner.outgoing_envelope.silence_assist(p1);
         let p0_in = (p0 + assist0 * (1.0 - p0)).clamp(0.0, 1.0);
         let p1_in = (p1 + assist1 * (1.0 - p1)).clamp(0.0, 1.0);
-        let out_g0 = BandGains::outgoing(self.is_automix, p0, swap_center);
-        let out_g1 = BandGains::outgoing(self.is_automix, p1, swap_center);
-        let in_g0 = BandGains::incoming(self.is_automix, p0_in, swap_center);
-        let in_g1 = BandGains::incoming(self.is_automix, p1_in, swap_center);
+        let out_g0 = BandGains::outgoing(self.is_automix, p0, plan.swap_center)
+            .lerp(BandGains::UNITY, (1.0 - plan.outgoing_level) * 0.18);
+        let out_g1 = BandGains::outgoing(self.is_automix, p1, plan.swap_center)
+            .lerp(BandGains::UNITY, (1.0 - plan.outgoing_level) * 0.18);
+        let in_g0 = BandGains::incoming(self.is_automix, p0_in, plan.swap_center)
+            .lerp(BandGains::UNITY, (1.0 - plan.incoming_level) * 0.18);
+        let in_g1 = BandGains::incoming(self.is_automix, p1_in, plan.swap_center)
+            .lerp(BandGains::UNITY, (1.0 - plan.incoming_level) * 0.18);
         let inv_frames = 1.0 / mix_frames.max(1) as f32;
         if ch == 2 {
             for f in 0..mix_frames {
