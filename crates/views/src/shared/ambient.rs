@@ -26,17 +26,17 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use gpui::prelude::*;
-use gpui::{App, Bounds, Context, Hsla, Render, Rgba, Window, canvas, div, point, px};
+use gpui::{App, Bounds, Context, Hsla, Render, Rgba, Window, canvas, div, point, px, rgba};
 use state::Sonora;
 use ui::{ActiveTheme as _, Theme};
 
 const BLOBS: usize = 5;
 const BLUR_FULL: f32 = 14.;
 const DOWNSCALE: f32 = 4.;
-const SHADE: f32 = 0.20;
-const DISCS: usize = 12;
-const DISC_FAINT: f32 = 0.03;
-const DISC_STRONG: f32 = 0.32;
+const SHADE: f32 = 0.35;
+const DISCS: usize = 3;
+const DISC_FAINT: f32 = 0.04;
+const DISC_STRONG: f32 = 0.36;
 const WASH: f32 = 0.8;
 
 struct BlobSpec {
@@ -55,7 +55,7 @@ struct BlobSpec {
     pulse_amp: f32,
 }
 
-const SPECS: [BlobSpec; 6] = [
+const SPECS: [BlobSpec; 5] = [
     BlobSpec {
         color_idx: 0,
         secondary_idx: 1,
@@ -91,7 +91,7 @@ const SPECS: [BlobSpec; 6] = [
         secondary_idx: 2,
         base_x: 0.22,
         base_y: 0.26,
-        size: 0.95,
+        size: 1.10,
         period_x: 21.,
         period_y: 28.,
         phase_x: 3.5,
@@ -106,7 +106,7 @@ const SPECS: [BlobSpec; 6] = [
         secondary_idx: 4,
         base_x: 0.78,
         base_y: 0.74,
-        size: 1.05,
+        size: 1.15,
         period_x: 35.,
         period_y: 29.,
         phase_x: 1.8,
@@ -119,9 +119,9 @@ const SPECS: [BlobSpec; 6] = [
     BlobSpec {
         color_idx: 4,
         secondary_idx: 0,
-        base_x: 0.78,
-        base_y: 0.24,
-        size: 0.92,
+        base_x: 0.72,
+        base_y: 0.28,
+        size: 1.05,
         period_x: 24.,
         period_y: 30.,
         phase_x: 4.7,
@@ -129,21 +129,6 @@ const SPECS: [BlobSpec; 6] = [
         amp_x: 0.22,
         amp_y: 0.17,
         pulse_period: 19.,
-        pulse_amp: 0.10,
-    },
-    BlobSpec {
-        color_idx: 0,
-        secondary_idx: 3,
-        base_x: 0.26,
-        base_y: 0.78,
-        size: 0.98,
-        period_x: 29.,
-        period_y: 22.,
-        phase_x: 5.2,
-        phase_y: 1.7,
-        amp_x: 0.21,
-        amp_y: 0.16,
-        pulse_period: 17.,
         pulse_amp: 0.10,
     },
 ];
@@ -229,14 +214,14 @@ impl Ambient {
         let base = match is_neon_mono {
             true => Hsla {
                 h: accent.h,
-                s: accent.s.clamp(0.06, 0.32),
-                l: (0.78 + (accent.l - 0.5) * 0.3).clamp(0.68, 0.94),
+                s: accent.s.clamp(0.04, 0.20),
+                l: (0.22 + (accent.l - 0.5) * 0.12).clamp(0.16, 0.28),
                 a: 1.,
             },
             false => Hsla {
                 h: accent.h,
-                s: (accent.s * 0.9 + 0.04).clamp(0.45, 0.75),
-                l: (0.40 + (accent.l - 0.45) * 0.5).clamp(0.28, 0.52),
+                s: (accent.s * 0.85 + 0.04).clamp(0.40, 0.70),
+                l: (0.28 + (accent.l - 0.45) * 0.25).clamp(0.20, 0.36),
                 a: 1.,
             },
         };
@@ -244,14 +229,14 @@ impl Ambient {
             Some(second) => match is_neon_mono {
                 true => Hsla {
                     h: second.h,
-                    s: second.s.clamp(0.08, 0.36),
-                    l: (0.72 + (second.l - 0.5) * 0.3).clamp(0.58, 0.88),
+                    s: second.s.clamp(0.04, 0.20),
+                    l: (0.18 + (second.l - 0.5) * 0.10).clamp(0.14, 0.24),
                     a: 1.,
                 },
                 false => Hsla {
                     h: second.h,
-                    s: (second.s * 0.9).clamp(0.4, 0.72),
-                    l: (0.38 + (second.l - 0.45) * 0.5).clamp(0.28, 0.5),
+                    s: (second.s * 0.85).clamp(0.35, 0.65),
+                    l: (0.25 + (second.l - 0.45) * 0.25).clamp(0.18, 0.34),
                     a: 1.,
                 },
             },
@@ -269,18 +254,18 @@ impl Ambient {
             true => [
                 base,
                 Hsla {
-                    l: (base.l + 0.06).clamp(0.72, 0.96),
-                    s: (base.s + 0.04).clamp(0.08, 0.38),
+                    l: (base.l + 0.06).clamp(0.20, 0.34),
+                    s: (base.s + 0.04).clamp(0.06, 0.24),
                     ..base
                 },
                 second,
                 Hsla {
-                    l: if theme.pitch_black { 0.02 } else { 0.16 },
+                    l: if theme.pitch_black { 0.02 } else { 0.12 },
                     s: 0.04,
                     ..base
                 },
                 Hsla {
-                    l: if theme.pitch_black { 0.01 } else { 0.12 },
+                    l: if theme.pitch_black { 0.01 } else { 0.08 },
                     s: 0.04,
                     ..base
                 },
@@ -288,20 +273,20 @@ impl Ambient {
             false => [
                 base,
                 Hsla {
-                    l: (base.l + 0.14).clamp(0.3, 0.62),
-                    s: (base.s - 0.08).clamp(0.4, 0.75),
+                    l: (base.l + 0.08).clamp(0.24, 0.40),
+                    s: (base.s - 0.06).clamp(0.35, 0.65),
                     ..base
                 },
                 second,
                 Hsla {
-                    l: (base.l - 0.13).clamp(0.18, 0.45),
-                    s: (base.s + 0.04).clamp(0.45, 0.8),
+                    l: (base.l - 0.08).clamp(0.14, 0.26),
+                    s: (base.s + 0.04).clamp(0.40, 0.70),
                     ..base
                 },
                 Hsla {
                     h: (base.h + 0.97).rem_euclid(1.),
-                    l: (base.l - 0.16).clamp(0.16, 0.4),
-                    s: (base.s - 0.02).clamp(0.4, 0.78),
+                    l: (base.l - 0.10).clamp(0.12, 0.22),
+                    s: (base.s - 0.02).clamp(0.35, 0.70),
                     ..base
                 },
             ],
@@ -428,6 +413,13 @@ impl Render for Ambient {
                                     }))
                             })),
                     ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .when_some(radius, |this, radius| this.rounded(radius))
+                    .bg(rgba(0x00000038)),
             )
             .child(ui::grain(window))
     }

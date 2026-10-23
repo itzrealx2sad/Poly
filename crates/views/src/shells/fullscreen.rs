@@ -10,7 +10,7 @@ use gpui::prelude::*;
 use gpui::{
     AnyView, App, Bounds, ClickEvent, Context, Entity, FocusHandle, FontWeight, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render,
-    ScrollWheelEvent, SharedString, SpringState, Task,
+    ScrollWheelEvent, SharedString, SpringState, Task, TextShadow,
 };
 use gpui::{Window, canvas, deferred, div, phi, px, relative};
 use i18n::t;
@@ -66,6 +66,7 @@ const VEIL: f32 = 0.34;
 /// and gets by on a pixel; a bar of the visualizer is a hard edge and needs a real radius
 /// before it stops reading through the text over it.
 const VEIL_BLUR: Pixels = px(12.);
+const TEXT_SHADOW: [f32; 3] = [1.5, 4., 10.];
 
 /// How hard the docked controls blur once they are all but hidden. The dock shrinks over them as
 /// they leave, so without it the last frames show the tops of the seek row cut off by its edge.
@@ -447,6 +448,8 @@ impl FullscreenView {
         let album = track.and_then(|track| track.album_id.clone());
         let explicit = track.is_some_and(|track| track.explicit);
         let meta_bounds = self.meta_bounds.clone();
+        let effects = shared::effects();
+        let shadow = TEXT_SHADOW.map(|blur| TextShadow::new(theme.background).blur(px(blur)));
         let trailing = |track: Option<&music::Track>, cx: &App| {
             div()
                 .flex()
@@ -521,6 +524,7 @@ impl FullscreenView {
                                     cx.stop_propagation();
                                 }),
                             )
+                            .when(effects, |this| this.text_shadow(shadow))
                             .child(title),
                     )
                     .child(div().flex().flex_1().child(trailing(track, cx))),
@@ -541,6 +545,7 @@ impl FullscreenView {
                         )
                         .text_size(theme.text(Text::Body))
                         .truncate()
+                        .when(effects, |this| this.text_shadow(shadow))
                         .on_click(|id, cx| navigate(Destination::Artist(id), cx)),
                     ),
                 )

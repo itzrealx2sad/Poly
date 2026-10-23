@@ -4,6 +4,14 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub static NvOptimusEnablement: u32 = 1;
+
+#[cfg(target_os = "windows")]
+#[unsafe(no_mangle)]
+pub static AmdPowerXpressRequestHighPerformance: i32 = 1;
+
 mod actions;
 mod assets;
 mod dock;

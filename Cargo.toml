@@ -193,8 +193,10 @@ librespot-protocol = { git = "https://github.com/sonorahq/librespot", rev = "f5d
 rodio = { git = "https://github.com/RustAudio/rodio", rev = "4aa22e85e5ad5565c45dfdda95051158eb6b56c3" }
 
 [profile.release]
+opt-level = 3
 lto = "thin"
 codegen-units = 1
+panic = "abort"
 strip = "debuginfo"
 
 [profile.dev]
