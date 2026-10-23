@@ -15,11 +15,11 @@ const INSTALLER: &str = match cfg!(target_arch = "aarch64") {
 };
 const SUMS: &str = "SHA256SUMS";
 const UNINSTALLER: &str = "unins000.exe";
-const RUNNING: &str = env!("CARGO_PKG_VERSION");
+const RUNNING: &str = env!("POLY_BUILD_VERSION");
 const INSTALLABLE: bool = cfg!(target_os = "windows");
 const AGENT: &str = concat!(
     "poly/",
-    env!("CARGO_PKG_VERSION"),
+    env!("POLY_BUILD_VERSION"),
     " (https://github.com/itzrealx2sad/Poly)"
 );
 
@@ -257,10 +257,26 @@ fn installed() -> bool {
 }
 
 fn newer(offered: &str, running: &str) -> bool {
+    let offered = offered.trim().trim_start_matches('v');
+    let running = running.trim().trim_start_matches('v');
+    if is_same(offered, running) {
+        return false;
+    }
     match (numbered(offered), numbered(running)) {
         (Some(offered), Some(running)) => offered > running,
-        _ => false,
+        _ => true,
     }
+}
+
+fn is_same(offered: &str, running: &str) -> bool {
+    if offered.eq_ignore_ascii_case(running) {
+        return true;
+    }
+    let is_hex = |s: &str| s.len() >= 7 && s.chars().all(|c| c.is_ascii_hexdigit());
+    if is_hex(offered) && is_hex(running) {
+        return offered.starts_with(running) || running.starts_with(offered);
+    }
+    false
 }
 
 fn numbered(version: &str) -> Option<(u64, u64, u64)> {
