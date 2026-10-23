@@ -11,3 +11,4 @@ __pycache__/
 /flatpak/flatpak
 /.flatpak-builder
 /dist
+*.exe

@@ -35,11 +35,11 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             arch: x64compatible
-            setup: Sonora-Setup
+            setup: Poly-Setup
           - target: aarch64-pc-windows-msvc
             os: windows-11-arm
             arch: arm64
-            setup: Sonora-Setup-arm64
+            setup: Poly-Setup-arm64
     steps:
       - uses: actions/checkout@v5
 
@@ -75,7 +75,7 @@ jobs:
           cache-targets: false
           cache-on-failure: true
       - name: build
-        run: cargo build --release --locked --package sonora --target ${{ matrix.target }}
+        run: cargo build --release --locked --package poly --target ${{ matrix.target }}
 
       - name: sccache stats
         if: always()
@@ -97,8 +97,8 @@ jobs:
 
             Windows)
               cp \
-                "target/$TARGET/release/sonora.exe" \
-                "dist/sonora-$VERSION-$TARGET.exe"
+                "target/$TARGET/release/poly.exe" \
+                "dist/poly-$VERSION-$TARGET.exe"
               ;;
 
             *)
@@ -127,7 +127,7 @@ jobs:
             $number = "0.0.0"
           }
           $env:SONORA_VERSION = $number
-          $env:SONORA_EXE = (Resolve-Path "target/$env:TARGET/release/sonora.exe").Path
+          $env:SONORA_EXE = (Resolve-Path "target/$env:TARGET/release/poly.exe").Path
           $env:SONORA_DIST = (Resolve-Path "dist").Path
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "scripts/windows/sonora.iss"
 

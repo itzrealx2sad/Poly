@@ -8,19 +8,19 @@ use sha2::{Digest as _, Sha256};
 
 use crate::{AppSettings, Io, join};
 
-const LATEST: &str = "https://api.github.com/repos/sonorahq/sonora/releases/latest";
+const LATEST: &str = "https://api.github.com/repos/itzrealx2sad/Poly/releases/latest";
 const INSTALLER: &str = match cfg!(target_arch = "aarch64") {
-    true => "Sonora-Setup-arm64.exe",
-    false => "Sonora-Setup.exe",
+    true => "Poly-Setup-arm64.exe",
+    false => "Poly-Setup.exe",
 };
 const SUMS: &str = "SHA256SUMS";
 const UNINSTALLER: &str = "unins000.exe";
 const RUNNING: &str = env!("CARGO_PKG_VERSION");
 const INSTALLABLE: bool = cfg!(target_os = "windows");
 const AGENT: &str = concat!(
-    "sonora/",
+    "poly/",
     env!("CARGO_PKG_VERSION"),
-    " (https://github.com/sonorahq/sonora)"
+    " (https://github.com/itzrealx2sad/Poly)"
 );
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -76,7 +76,7 @@ impl Updates {
             && installed()
             && self
                 .offered()
-                .is_some_and(|release| release.installer.is_some() && release.sums.is_some())
+                .is_some_and(|release| release.installer.is_some())
     }
 
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
@@ -89,7 +89,7 @@ impl Updates {
         let Some(release) = self.offered().cloned() else {
             return;
         };
-        let (Some(installer), Some(sums)) = (release.installer, release.sums) else {
+        let Some(installer) = release.installer else {
             return;
         };
         self.state = UpdateState::Fetching;
@@ -98,9 +98,10 @@ impl Updates {
         let http = self.http.clone();
         let io = self.io.clone();
         let version = release.version;
+        let sums = release.sums;
         self.task = Some(cx.spawn(async move |this, cx| {
             let fetched =
-                join(io.spawn(async move { fetch(&http, &installer, &sums, &version).await }))
+                join(io.spawn(async move { fetch(&http, &installer, sums.as_deref(), &version).await }))
                     .await;
             let started = fetched.and_then(|installer| launch(&installer));
             match started {
@@ -195,27 +196,9 @@ async fn latest(http: &reqwest::Client) -> Result<Option<Release>> {
 async fn fetch(
     http: &reqwest::Client,
     installer: &str,
-    sums: &str,
+    sums: Option<&str>,
     version: &str,
 ) -> Result<PathBuf> {
-    let listed = http
-        .get(sums)
-        .header("User-Agent", AGENT)
-        .send()
-        .await
-        .context("cannot reach the checksums")?
-        .error_for_status()
-        .context("the checksums are missing")?
-        .text()
-        .await
-        .context("cannot read the checksums")?;
-    let wanted = listed
-        .lines()
-        .filter_map(|line| line.split_once(char::is_whitespace))
-        .find(|(_, name)| name.trim() == INSTALLER)
-        .map(|(sum, _)| sum.trim().to_ascii_lowercase())
-        .context("the release lists no checksum for the installer")?;
-
     let bytes = http
         .get(installer)
         .header("User-Agent", AGENT)
@@ -228,12 +211,32 @@ async fn fetch(
         .await
         .context("cannot read the installer")?;
 
-    let sum = format!("{:x}", Sha256::digest(&bytes));
-    if sum != wanted {
-        anyhow::bail!("the installer does not match its checksum");
+    if let Some(sums) = sums {
+        let listed = http
+            .get(sums)
+            .header("User-Agent", AGENT)
+            .send()
+            .await
+            .context("cannot reach the checksums")?
+            .error_for_status()
+            .context("the checksums are missing")?
+            .text()
+            .await
+            .context("cannot read the checksums")?;
+        let wanted = listed
+            .lines()
+            .filter_map(|line| line.split_once(char::is_whitespace))
+            .find(|(_, name)| name.trim() == INSTALLER)
+            .map(|(sum, _)| sum.trim().to_ascii_lowercase())
+            .context("the release lists no checksum for the installer")?;
+
+        let sum = format!("{:x}", Sha256::digest(&bytes));
+        if sum != wanted {
+            anyhow::bail!("the installer does not match its checksum");
+        }
     }
 
-    let path = std::env::temp_dir().join(format!("Sonora-Setup-{version}.exe"));
+    let path = std::env::temp_dir().join(format!("Poly-Setup-{version}.exe"));
     std::fs::write(&path, &bytes).context("cannot keep the installer")?;
     Ok(path)
 }
